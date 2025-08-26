@@ -4,6 +4,29 @@
 
 This guide shows how to quickly start using the refactored YouTube Transcription Service.
 
+## ⚡ NEW: Chunking for Long Transcripts
+
+This service now supports **automatic chunking** for long transcripts (>5000 characters), enabling processing of unlimited-length videos:
+
+- **Automatic detection**: Long transcripts are automatically chunked
+- **Intelligent splitting**: Uses sentence boundaries for clean breaks  
+- **Overlap handling**: 200-character overlap between chunks
+- **Cost estimation**: Pre-processing cost and time estimates
+- **Progress tracking**: Real-time progress for chunked processing
+
+### Chunking Configuration
+
+Chunking behavior can be configured in `src/config.py`:
+
+```python
+# Text chunking settings for long transcripts
+chunking_enabled: bool = True
+chunk_size: int = 4000        # Characters per chunk  
+chunk_overlap: int = 200      # Overlap between chunks
+max_chunks: int = 20          # Safety limit
+max_transcript_length: int = 5000  # Single-pass limit
+```
+
 ### Step 1: Setup (2 minutes)
 
 ```bash

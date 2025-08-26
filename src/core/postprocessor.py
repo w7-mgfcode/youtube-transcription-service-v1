@@ -5,6 +5,7 @@ from typing import Optional
 
 from ..config import settings, VertexAIModels
 from ..utils.colors import Colors
+from ..utils.chunking import TranscriptChunker
 
 
 class VertexPostProcessor:
@@ -12,100 +13,148 @@ class VertexPostProcessor:
     
     def __init__(self):
         self.project_id = settings.vertex_project_id
+        self.chunker = TranscriptChunker()
     
     def process(self, transcript_text: str, video_title: str = "", vertex_ai_model: str = "") -> Optional[str]:
         """
         Post-process transcript using Vertex AI (Gemini) for script formatting.
+        Supports both single-pass and chunked processing for long transcripts.
         
         Args:
             transcript_text: Original transcript text
             video_title: Video title
+            vertex_ai_model: Specific model to use
             
         Returns:
             Formatted script text or None on error
         """
         print(Colors.BLUE + "\n🤖 Vertex AI utófeldolgozás indítása..." + Colors.ENDC)
         
+        # Check if chunking is needed
+        if self.chunker.needs_chunking(transcript_text):
+            return self._process_with_chunking(transcript_text, video_title, vertex_ai_model)
+        else:
+            return self._process_single_chunk(transcript_text, video_title, vertex_ai_model)
+    
+    def _process_with_chunking(self, transcript_text: str, video_title: str, vertex_ai_model: str) -> Optional[str]:
+        """Process long transcript using chunking strategy."""
+        print(Colors.YELLOW + f"📑 Hosszú átirat észlelve ({len(transcript_text)} karakter)" + Colors.ENDC)
+        
+        # Show chunking summary
+        chunk_summary = self.chunker.get_chunk_summary(transcript_text)
+        print(Colors.CYAN + f"   ├─ {chunk_summary}" + Colors.ENDC)
+        
+        # Get chunks
+        chunks = self.chunker.chunk_text(transcript_text)
+        print(Colors.CYAN + f"   ├─ {len(chunks)} chunk létrehozva" + Colors.ENDC)
+        
+        try:
+            import vertexai
+            from vertexai.generative_models import GenerativeModel, GenerationConfig
+            
+            # Process each chunk
+            processed_chunks = []
+            successful_config = None
+            
+            for i, (chunk_text, start_pos, end_pos) in enumerate(chunks):
+                print(Colors.CYAN + f"   ├─ Chunk {i+1}/{len(chunks)} feldolgozása ({len(chunk_text)} kar.)" + Colors.ENDC)
+                
+                # Use single chunk processing for each chunk
+                result = self._process_single_chunk_internal(chunk_text, vertex_ai_model)
+                if result is None:
+                    print(Colors.WARNING + f"   ✗ Chunk {i+1} feldolgozása sikertelen" + Colors.ENDC)
+                    return None
+                
+                processed_chunks.append(result)
+                print(Colors.GREEN + f"   ✓ Chunk {i+1} kész" + Colors.ENDC)
+            
+            # Merge results
+            print(Colors.CYAN + "   ├─ Chunk-ok egyesítése..." + Colors.ENDC)
+            merged_text = self.chunker.merge_chunked_results(processed_chunks, chunks)
+            
+            # Build final result with chunk information
+            final_text = self._build_final_result_chunked(
+                merged_text, video_title, transcript_text, 
+                vertex_ai_model, len(chunks)
+            )
+            
+            print(Colors.GREEN + f"   ✓ Chunked feldolgozás kész: {len(chunks)} chunk összevonva" + Colors.ENDC)
+            return final_text
+            
+        except ImportError:
+            print(Colors.WARNING + "⚠ Vertex AI könyvtár nincs telepítve!" + Colors.ENDC)
+            return self._fallback_processing(transcript_text, video_title)
+        except Exception as e:
+            print(Colors.FAIL + f"✗ Chunked feldolgozás hiba: {e}" + Colors.ENDC)
+            return self._fallback_processing(transcript_text, video_title)
+    
+    def _process_single_chunk(self, transcript_text: str, video_title: str, vertex_ai_model: str) -> Optional[str]:
+        """Process transcript as single chunk (original behavior)."""
         try:
             import vertexai
             from vertexai.generative_models import GenerativeModel, GenerationConfig
             
             print(Colors.CYAN + f"   ├─ Project: {self.project_id}" + Colors.ENDC)
             
-            # Determine which models to try
-            if vertex_ai_model and vertex_ai_model != VertexAIModels.AUTO_DETECT:
-                # User specified a model, try only that one first
-                models_to_try = [vertex_ai_model] + VertexAIModels.get_auto_detect_order()
-                print(Colors.CYAN + f"   ├─ Kiválasztott modell: {vertex_ai_model}" + Colors.ENDC)
-            else:
-                # Auto-detect mode
-                models_to_try = VertexAIModels.get_auto_detect_order()
-                print(Colors.CYAN + "   ├─ Automatikus modell kiválasztás" + Colors.ENDC)
-            
-            # Try different regions
-            regions = ["us-central1", "us-east1", "us-west1", "europe-west4"]
-            
-            model = None
-            successful_config = None
-            
-            for region in regions:
-                for model_name in models_to_try:
-                    try:
-                        print(Colors.CYAN + f"   ├─ Próbálkozás: {model_name} @ {region}" + Colors.ENDC)
-                        
-                        # Initialize Vertex AI with current region
-                        vertexai.init(project=self.project_id, location=region)
-                        model = GenerativeModel(model_name)
-                        
-                        successful_config = (model_name, region)
-                        print(Colors.GREEN + f"   ✓ Sikeres kapcsolat: {model_name} @ {region}" + Colors.ENDC)
-                        break
-                        
-                    except Exception as e:
-                        print(Colors.WARNING + f"   ✗ {model_name} @ {region}: {str(e)[:100]}..." + Colors.ENDC)
-                        continue
+            result = self._process_single_chunk_internal(transcript_text, vertex_ai_model)
+            if result is None:
+                return None
                 
-                if successful_config:
-                    break
-            
-            if not successful_config:
-                raise Exception("Nem sikerült kapcsolódni egyetlen Gemini modellhez sem")
-                
-            print(Colors.CYAN + "   └─ Prompt küldése..." + Colors.ENDC)
-            
-            # Create formatting prompt
-            prompt = self._build_formatting_prompt(transcript_text)
-            
-            # Call Gemini API
-            print(Colors.BLUE + "   ⏳ Gemini válaszára várunk..." + Colors.ENDC)
-            
-            response = model.generate_content(
-                prompt,
-                generation_config=GenerationConfig(
-                    temperature=0.3,  # Low temperature for consistent formatting
-                    max_output_tokens=8192,
-                    top_p=0.8,
-                )
-            )
-            
-            formatted_text = response.text
-            
-            # Build final result with header
-            final_text = self._build_final_result(formatted_text, video_title, transcript_text, successful_config[0])
-            
-            print(Colors.GREEN + f"   ✓ Vertex AI formázás kész ({successful_config[0]}): {len(formatted_text.split())} szó" + Colors.ENDC)
-            
+            # Build final result 
+            final_text = self._build_final_result(result, video_title, transcript_text, vertex_ai_model)
             return final_text
             
         except ImportError:
             print(Colors.WARNING + "⚠ Vertex AI könyvtár nincs telepítve!" + Colors.ENDC)
-            print(Colors.WARNING + "   Telepítsd: pip install google-cloud-aiplatform" + Colors.ENDC)
             return self._fallback_processing(transcript_text, video_title)
         except Exception as e:
             print(Colors.FAIL + f"✗ Vertex AI hiba: {e}" + Colors.ENDC)
-            print(Colors.WARNING + f"   Részletek: {str(e)}" + Colors.ENDC)
-            print(Colors.CYAN + "   🔄 Fallback formázás alkalmazása..." + Colors.ENDC)
             return self._fallback_processing(transcript_text, video_title)
+    
+    def _process_single_chunk_internal(self, chunk_text: str, vertex_ai_model: str) -> Optional[str]:
+        """Internal method to process a single chunk of text."""
+        try:
+            import vertexai
+            from vertexai.generative_models import GenerativeModel, GenerationConfig
+            
+            # Determine which models to try
+            if vertex_ai_model and vertex_ai_model != VertexAIModels.AUTO_DETECT:
+                models_to_try = [vertex_ai_model] + VertexAIModels.get_auto_detect_order()
+            else:
+                models_to_try = VertexAIModels.get_auto_detect_order()
+            
+            # Try different regions
+            regions = ["us-central1", "us-east1", "us-west1", "europe-west4"]
+            
+            for region in regions:
+                for model_name in models_to_try:
+                    try:
+                        # Initialize Vertex AI with current region
+                        vertexai.init(project=self.project_id, location=region)
+                        model = GenerativeModel(model_name)
+                        
+                        # Create formatting prompt - use chunk_text directly
+                        prompt = self._build_formatting_prompt(chunk_text)
+                        
+                        # Call Gemini API
+                        response = model.generate_content(
+                            prompt,
+                            generation_config=GenerationConfig(
+                                temperature=0.3,
+                                max_output_tokens=8192,
+                                top_p=0.8,
+                            )
+                        )
+                        
+                        return response.text
+                        
+                    except Exception as e:
+                        continue
+            
+            raise Exception("Nem sikerült kapcsolódni egyetlen Gemini modellhez sem")
+            
+        except Exception as e:
+            return None
     
     def _fallback_processing(self, transcript_text: str, video_title: str = "") -> str:
         """
@@ -139,8 +188,12 @@ class VertexPostProcessor:
     
     def _build_formatting_prompt(self, transcript_text: str) -> str:
         """Build the formatting prompt for Gemini."""
-        # Limit transcript to first 5000 characters due to prompt limits
-        limited_transcript = transcript_text[:5000]
+        # For chunked processing, we use the text as-is (already chunked appropriately)
+        # For single-pass processing, we still apply the 5000 character limit
+        if len(transcript_text) <= settings.chunk_size:
+            limited_transcript = transcript_text
+        else:
+            limited_transcript = transcript_text[:settings.max_transcript_length]
         
         prompt = f"""Formázd át ezt a YouTube videó átiratot professzionális SCRIPT/FELIRAT stílusúra!
 
@@ -208,6 +261,32 @@ FORMÁZOTT SCRIPT:"""
         final_text += f"\n\n{'='*70}\n"
         final_text += f"📊 Script statisztika (AI formázás):\n"
         final_text += f"   • Sorok száma: {len(lines)}\n"
+        final_text += f"   • Összes szó: {word_count}\n"
+        final_text += f"   • Detektált szünetek: {pause_count}\n"
+        final_text += f"   • Átlagos sorhossz: {word_count/len(lines) if lines else 0:.1f} szó\n"
+        
+        return final_text
+    
+    def _build_final_result_chunked(self, formatted_text: str, video_title: str, 
+                                  original_transcript: str, model_name: str, chunk_count: int) -> str:
+        """Build final result for chunked processing with additional statistics."""
+        final_text = f"📹 Videó: {video_title}\n"
+        final_text += f"📅 Feldolgozva: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+        final_text += f"🤖 Utófeldolgozás: Vertex AI ({model_name}) - Chunked Mode\n"
+        final_text += f"📑 Chunks: {chunk_count} darab ({len(original_transcript)} → {len(formatted_text)} karakter)\n"
+        final_text += "=" * 70 + "\n\n"
+        final_text += formatted_text
+        
+        # Calculate statistics
+        lines = formatted_text.split('\n')
+        word_count = len(formatted_text.split())
+        pause_count = formatted_text.count('[') - formatted_text.count('[0:')
+        
+        final_text += f"\n\n{'='*70}\n"
+        final_text += f"📊 Chunked Script statisztika:\n"
+        final_text += f"   • Eredeti hossz: {len(original_transcript)} karakter\n"
+        final_text += f"   • Feldolgozott chunks: {chunk_count}\n"
+        final_text += f"   • Formázott sorok: {len(lines)}\n"
         final_text += f"   • Összes szó: {word_count}\n"
         final_text += f"   • Detektált szünetek: {pause_count}\n"
         final_text += f"   • Átlagos sorhossz: {word_count/len(lines) if lines else 0:.1f} szó\n"

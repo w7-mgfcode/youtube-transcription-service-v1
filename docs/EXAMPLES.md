@@ -1,5 +1,37 @@
 # Usage Examples
 
+## 🆕 Chunking Examples
+
+### Get Chunking Estimate
+```python
+import httpx
+
+# Get estimate for long transcript
+response = httpx.post("http://localhost:8000/v1/chunking-estimate", json={
+    "transcript_text": "Your very long transcript text here..." * 1000
+})
+
+estimate = response.json()
+print(f"Needs chunking: {estimate['needs_chunking']}")
+print(f"Chunks: {estimate['total_chunks']}")
+print(f"Estimated cost: ${estimate['estimated_cost_usd']:.4f}")
+print(f"Estimated time: {estimate['estimated_time_seconds']:.1f}s")
+```
+
+### CLI with Long Video
+```bash
+# CLI automatically detects long transcripts and shows estimates
+docker exec -it v1-transcribe python src/main.py
+
+# Example output for long video:
+# 📑 Hosszú átirat észlelve - Chunked feldolgozás lesz alkalmazva
+#    ├─ Eredeti hossz: 25000 karakter
+#    ├─ Chunks száma: 7
+#    ├─ Becsült feldolgozási idő: 12.5 mp
+#    └─ Becsült költség: $0.0025
+# Folytatod? (i/n) [i]:
+```
+
 ## API Usage Examples
 
 ### Python Client

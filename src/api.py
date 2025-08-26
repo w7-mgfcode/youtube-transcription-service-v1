@@ -12,6 +12,7 @@ from pydantic import BaseModel, HttpUrl
 from .config import settings, VertexAIModels
 from .core.transcriber import TranscriptionService
 from .utils.colors import Colors
+from .utils.chunking import TranscriptChunker
 
 
 # Pydantic models for API
@@ -50,6 +51,29 @@ class JobListResponse(BaseModel):
     total_count: int
 
 
+class ChunkingEstimateRequest(BaseModel):
+    """Request model for chunking estimate."""
+    transcript_text: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "transcript_text": "Long transcript text here..."
+            }
+        }
+
+
+class ChunkingEstimateResponse(BaseModel):
+    """Response model for chunking estimate."""
+    needs_chunking: bool
+    total_chunks: int
+    total_characters: int
+    original_length: int
+    estimated_cost_usd: float
+    estimated_time_seconds: float
+    chunks_info: list
+
+
 # FastAPI app setup
 app = FastAPI(
     title="YouTube Transcribe Service",
@@ -70,6 +94,7 @@ app.add_middleware(
 
 # Global instances
 transcriber = TranscriptionService()
+chunker = TranscriptChunker()
 
 # In-memory job store (replace with Redis/database in production)
 jobs: Dict[str, Dict[str, Any]] = {}
@@ -135,6 +160,39 @@ async def create_transcription(request: TranscribeRequest, background_tasks: Bac
     )
     
     return JobResponse(job_id=job_id, status="queued")
+
+
+@app.post("/v1/chunking-estimate", response_model=ChunkingEstimateResponse)
+async def get_chunking_estimate(request: ChunkingEstimateRequest):
+    """
+    Get chunking estimate for a given transcript text.
+    
+    Args:
+        request: Text to estimate chunking for
+        
+    Returns:
+        Chunking estimate with cost and time predictions
+    """
+    try:
+        needs_chunking = chunker.needs_chunking(request.transcript_text)
+        
+        if needs_chunking:
+            estimate = chunker.estimate_processing_cost(request.transcript_text)
+            return ChunkingEstimateResponse(**estimate, needs_chunking=True)
+        else:
+            # Single pass processing
+            return ChunkingEstimateResponse(
+                needs_chunking=False,
+                total_chunks=1,
+                total_characters=len(request.transcript_text),
+                original_length=len(request.transcript_text),
+                estimated_cost_usd=len(request.transcript_text) / 1000 * 0.0001,
+                estimated_time_seconds=len(request.transcript_text) / 1000 * 0.5,
+                chunks_info=[(1, len(request.transcript_text), 0, len(request.transcript_text))]
+            )
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error estimating chunking: {str(e)}")
 
 
 @app.get("/v1/jobs/{job_id}", response_model=JobResponse)

@@ -6,6 +6,7 @@ from typing import Tuple
 from .core.transcriber import TranscriptionService
 from .utils.colors import Colors, print_header
 from .utils.validators import get_user_inputs
+from .utils.chunking import TranscriptChunker
 from .config import VertexAIModels
 
 
@@ -14,6 +15,7 @@ class InteractiveCLI:
     
     def __init__(self):
         self.transcriber = TranscriptionService()
+        self.chunker = TranscriptChunker()
     
     def run(self):
         """Run interactive CLI session."""
@@ -58,21 +60,27 @@ class InteractiveCLI:
                     use_vertex, selected_model = self._ask_vertex_ai_processing()
                     
                     if use_vertex:
-                        print(Colors.BLUE + f"\n🤖 Vertex AI utófeldolgozás ({selected_model})..." + Colors.ENDC)
+                        # Check if chunking is needed and show estimate
+                        continue_processing = self._show_chunking_info(result["transcript_file"])
                         
-                        # Re-process with Vertex AI
-                        vertex_result = self.transcriber.process(
-                            url=video_url,
-                            test_mode=test_mode,
-                            breath_detection=breath_detection,
-                            use_vertex_ai=True,
-                            vertex_ai_model=selected_model,
-                            progress_callback=print_progress
-                        )
-                        
-                        if vertex_result["status"] == "completed":
-                            result = vertex_result
-                            print(Colors.GREEN + "✓ Vertex AI formázás alkalmazva!" + Colors.ENDC)
+                        if not continue_processing:
+                            print(Colors.CYAN + "Vertex AI feldolgozás kihagyva." + Colors.ENDC)
+                        else:
+                            print(Colors.BLUE + f"\n🤖 Vertex AI utófeldolgozás ({selected_model})..." + Colors.ENDC)
+                            
+                            # Re-process with Vertex AI
+                            vertex_result = self.transcriber.process(
+                                url=video_url,
+                                test_mode=test_mode,
+                                breath_detection=breath_detection,
+                                use_vertex_ai=True,
+                                vertex_ai_model=selected_model,
+                                progress_callback=print_progress
+                            )
+                            
+                            if vertex_result["status"] == "completed":
+                                result = vertex_result
+                                print(Colors.GREEN + "✓ Vertex AI formázás alkalmazva!" + Colors.ENDC)
                 
                 # Show final results
                 self._show_final_results(result, breath_detection)
@@ -203,6 +211,40 @@ class InteractiveCLI:
         
         if result.get("test_mode"):
             print(Colors.WARNING + "   ⚡ Teszt mód használva (60s)" + Colors.ENDC)
+    
+    def _show_chunking_info(self, transcript_file: str):
+        """Show chunking information and cost estimates before processing."""
+        try:
+            with open(transcript_file, 'r', encoding='utf-8') as f:
+                transcript_text = f.read()
+            
+            # Check if chunking is needed
+            if self.chunker.needs_chunking(transcript_text):
+                cost_info = self.chunker.estimate_processing_cost(transcript_text)
+                
+                print(Colors.YELLOW + "\n📑 Hosszú átirat észlelve - Chunked feldolgozás lesz alkalmazva" + Colors.ENDC)
+                print(Colors.CYAN + f"   ├─ Eredeti hossz: {len(transcript_text)} karakter" + Colors.ENDC)
+                print(Colors.CYAN + f"   ├─ Chunks száma: {cost_info['total_chunks']}" + Colors.ENDC)
+                print(Colors.CYAN + f"   ├─ Becsült feldolgozási idő: {cost_info['estimated_time_seconds']:.1f} mp" + Colors.ENDC)
+                print(Colors.CYAN + f"   └─ Becsült költség: ${cost_info['estimated_cost_usd']:.4f}" + Colors.ENDC)
+                
+                # Ask for confirmation
+                print(Colors.WARNING + "\nFigyelm: A chunked feldolgozás több időt és költséget igényel." + Colors.ENDC)
+                response = input(Colors.BOLD + "Folytatod? (i/n) [i]: " + Colors.ENDC).strip().lower()
+                
+                if response and response.startswith('n'):
+                    print(Colors.WARNING + "Vertex AI feldolgozás megszakítva." + Colors.ENDC)
+                    return False
+                    
+                print(Colors.GREEN + "✓ Chunked feldolgozás jóváhagyva" + Colors.ENDC)
+            else:
+                print(Colors.GREEN + f"\n✓ Standard feldolgozás ({len(transcript_text)} karakter)" + Colors.ENDC)
+                
+            return True
+            
+        except Exception as e:
+            print(Colors.WARNING + f"⚠ Chunking információ lekérése sikertelen: {e}" + Colors.ENDC)
+            return True
     
     def _show_completion_message(self):
         """Show completion message exactly like v25.py."""

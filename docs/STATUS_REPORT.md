@@ -30,6 +30,9 @@ The YouTube Transcription Service v1.0 has been successfully refactored from the
   - gemini-1.5-pro
   - gemini-1.5-flash
   - auto-detect (smart fallback)
+- [x] **🆕 Chunked Processing** - Unlimited transcript length support
+- [x] **🆕 Cost Estimation** - Pre-processing cost and time estimates
+- [x] **🆕 Progress Tracking** - Real-time progress for chunked operations
 - [x] **CLI Model Picker** - Interactive Hungarian interface
 - [x] **API Model Parameter** - JSON parameter support
 - [x] **Multi-Region Fallback** - us-central1, us-east1, us-west1, europe-west4

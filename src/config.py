@@ -99,6 +99,13 @@ class Settings(BaseSettings):
     pause_long: float = 1.5
     pause_paragraph: float = 3.0
     
+    # Text chunking settings for long transcripts
+    chunking_enabled: bool = True
+    chunk_size: int = 4000  # Characters per chunk
+    chunk_overlap: int = 200  # Character overlap between chunks
+    max_chunks: int = 20  # Maximum chunks to process (safety limit)
+    max_transcript_length: int = 5000  # Current single-pass limit
+    
     # Paths
     temp_dir: str = "/app/temp"
     data_dir: str = "/app/data"
