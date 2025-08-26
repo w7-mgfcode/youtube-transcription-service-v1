@@ -15,7 +15,7 @@ services:
       - API_PORT=8000
       - LANGUAGE_CODE=hu-HU
     volumes:
-      - ./vertex-ai-key.json:/app/credentials/service-account.json:ro
+      - ./credentials/vertex-ai-key.json:/app/credentials/service-account.json:ro
       - ./data:/app/data
       - ./temp:/app/temp
     restart: unless-stopped
