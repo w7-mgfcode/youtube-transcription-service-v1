@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  transcribe:
+    build: .
+    container_name: v1-transcribe
+    ports:
+      - "8000:8000"
+    environment:
+      - MODE=api
+      - GCS_BUCKET_NAME=angyal-audio-transcripts-2025
+      - VERTEX_PROJECT_ID=gen-lang-client-0419432952
+      - VERTEX_AI_MODEL=gemini-2.0-flash
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - LANGUAGE_CODE=hu-HU
+    volumes:
+      - ./vertex-ai-key.json:/app/credentials/service-account.json:ro
+      - ./data:/app/data
+      - ./temp:/app/temp
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  default:
+    name: transcribe-network

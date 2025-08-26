@@ -1,0 +1,16 @@
+# Sample YouTube URLs for batch processing
+# Lines starting with # are comments and will be ignored
+
+# Test video (Rick Astley - Never Gonna Give You Up)
+https://youtube.com/watch?v=dQw4w9WgXcQ
+
+# Add more URLs here:
+# https://youtube.com/watch?v=ANOTHER_VIDEO_ID
+# https://youtu.be/SHORT_URL_FORMAT
+
+# You can also add comments to organize:
+# Educational videos:
+# https://youtube.com/watch?v=EDUCATIONAL_VIDEO
+
+# Music videos:
+# https://youtube.com/watch?v=MUSIC_VIDEO
