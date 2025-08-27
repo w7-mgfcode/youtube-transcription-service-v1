@@ -9,6 +9,7 @@ from .core.synthesizer import ElevenLabsSynthesizer
 from .core.video_muxer import VideoMuxer
 from .core.dubbing_service import DubbingService
 from .core.tts_factory import TTSFactory
+from .core.tts_interface import TTSProvider
 from .utils.colors import Colors, print_header
 from .utils.validators import (
     get_user_inputs, get_dubbing_preferences, 

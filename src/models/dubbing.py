@@ -137,18 +137,19 @@ class DubbingRequest(BaseModel):
     # Optional existing transcript (for CLI mode)
     existing_transcript: Optional[str] = Field(None, description="Pre-existing transcript text")
 
-    @validator('enable_synthesis')
-    def synthesis_requires_voice(cls, v, values):
-        """Ensure voice_id is provided when synthesis is enabled."""
-        if v and not values.get('voice_id'):
-            raise ValueError('voice_id is required when enable_synthesis is True')
-        return v
-
     @validator('enable_video_muxing')  
     def video_muxing_requires_synthesis(cls, v, values):
         """Ensure synthesis is enabled when video muxing is requested."""
         if v and not values.get('enable_synthesis'):
             raise ValueError('enable_synthesis must be True when enable_video_muxing is True')
+        return v
+
+    @validator('voice_id', always=True)
+    def voice_id_required_for_synthesis(cls, v, values):
+        """Ensure voice_id is provided when synthesis is enabled."""
+        enable_synthesis = values.get('enable_synthesis')
+        if enable_synthesis and not v:
+            raise ValueError('voice_id is required when enable_synthesis is True')
         return v
 
     class Config:

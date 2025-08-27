@@ -102,8 +102,18 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             if not self.validate_voice_id(voice_id):
                 raise VoiceNotFoundError(f"Voice '{voice_id}' not found in Google TTS")
             
-            # Convert script to SSML with timestamp preservation
-            ssml_content = self._script_to_ssml(script_text)
+            # Detect voice type to determine input format
+            voice_type = self._detect_voice_type(voice_id)
+            
+            # Chirp voices don't support SSML - use plain text
+            if voice_type and 'Chirp' in voice_type:
+                # Convert to plain text for Chirp voices
+                ssml_content = self._script_to_text(script_text)
+                print(Colors.CYAN + f"   ├─ Using plain text input (Chirp voice)" + Colors.ENDC)
+            else:
+                # Convert script to SSML with timestamp preservation for other voices
+                ssml_content = self._script_to_ssml(script_text)
+                print(Colors.CYAN + f"   ├─ Using SSML input" + Colors.ENDC)
             
             print(Colors.CYAN + f"   ├─ Voice: {voice_id}" + Colors.ENDC)
             print(Colors.CYAN + f"   ├─ Audio quality: {audio_quality}" + Colors.ENDC)
@@ -151,14 +161,33 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             # Parse voice_id to get language and name
             language_code = self._extract_language_from_voice_id(voice_id)
             
-            # Set the input text with SSML
-            synthesis_input = texttospeech.SynthesisInput(ssml=ssml_content)
+            # Detect voice type and get model if needed
+            voice_type = self._detect_voice_type(voice_id)
+            model_name = self._get_voice_model(voice_type)
+            
+            # Set the input based on voice type
+            if voice_type and 'Chirp' in voice_type:
+                # Use text input for Chirp voices
+                synthesis_input = texttospeech.SynthesisInput(text=ssml_content)
+            else:
+                # Use SSML input for other voices
+                synthesis_input = texttospeech.SynthesisInput(ssml=ssml_content)
             
             # Build the voice request
-            voice = texttospeech.VoiceSelectionParams(
-                language_code=language_code,
-                name=voice_id
-            )
+            voice_params = {
+                'language_code': language_code,
+                'name': voice_id
+            }
+            
+            # Add model parameter if required (for Studio/Journey voices)
+            if model_name:
+                print(Colors.CYAN + f"   ├─ Voice model: {model_name}" + Colors.ENDC)
+                # For voices requiring model specification
+                voice_params['custom_voice'] = {
+                    'model': model_name
+                }
+            
+            voice = texttospeech.VoiceSelectionParams(**voice_params)
             
             # Select the audio configuration
             audio_config = texttospeech.AudioConfig(
@@ -221,11 +250,24 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             client = self._get_client()
             language_code = self._extract_language_from_voice_id(voice_id)
             
+            # Detect voice type and get model if needed
+            voice_type = self._detect_voice_type(voice_id)
+            model_name = self._get_voice_model(voice_type)
+            
             # Voice and audio configuration
-            voice = texttospeech.VoiceSelectionParams(
-                language_code=language_code,
-                name=voice_id
-            )
+            voice_params = {
+                'language_code': language_code,
+                'name': voice_id
+            }
+            
+            # Add model parameter if required (for Studio/Journey voices)
+            if model_name:
+                # For voices requiring model specification
+                voice_params['custom_voice'] = {
+                    'model': model_name
+                }
+            
+            voice = texttospeech.VoiceSelectionParams(**voice_params)
             
             audio_config = texttospeech.AudioConfig(
                 audio_encoding=self._get_audio_encoding(audio_quality),
@@ -320,6 +362,40 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
         text = re.sub(r'\\$([\\d,]+(?:\\.\\d{2})?)', r'<say-as interpret-as="currency" language="en-US">\\1</say-as>', text)
         
         return text.strip()
+    
+    def _script_to_text(self, script: str) -> str:
+        """Convert timestamped script to plain text for Chirp voices."""
+        text_parts = []
+        
+        lines = script.split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Match timestamp pattern and extract text
+            timestamp_match = re.match(r'\[(\d{1,2}):(\d{2}):(\d{2})\]\s*(.*)', line)
+            
+            if timestamp_match:
+                hours, minutes, seconds, text = timestamp_match.groups()
+                
+                if text and not text.startswith('[') and text.strip():
+                    # Clean text for plain text usage
+                    clean_text = text.strip()
+                    # Remove any remaining SSML-like markup
+                    clean_text = re.sub(r'<[^>]+>', '', clean_text)
+                    
+                    if clean_text:
+                        text_parts.append(clean_text)
+            else:
+                # Line without timestamp, include if it's valid text
+                if not line.startswith('[') and line.strip():
+                    clean_text = re.sub(r'<[^>]+>', '', line.strip())
+                    if clean_text:
+                        text_parts.append(clean_text)
+        
+        return ' '.join(text_parts)
     
     def _split_ssml_into_chunks(self, ssml_content: str, max_chars: int) -> List[str]:
         """Split SSML content into processable chunks."""
@@ -484,7 +560,7 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
                         provider=TTSProvider.GOOGLE_TTS,
                         description=self._get_voice_description(voice.name, category),
                         category=category,
-                        is_premium=category in ['neural2', 'studio'],
+                        is_premium=category in ['neural2', 'studio', 'journey', 'chirp3hd', 'chirphd', 'chirp3', 'chirp'],
                         labels={
                             'natural_sample_rate': voice.natural_sample_rate_hertz,
                             'voice_type': category,
@@ -504,8 +580,20 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
         """Determine voice category from voice name."""
         name_lower = voice_name.lower()
         
-        if 'studio' in name_lower:
+        # Check for Chirp voices first (most specific)
+        if ('chirp3hd' in name_lower or 'chirp-3-hd' in name_lower or 
+            'chirp3-hd' in name_lower):
+            return 'chirp3hd'
+        elif 'chirphd' in name_lower or 'chirp-hd' in name_lower:
+            return 'chirphd'
+        elif 'chirp3' in name_lower:
+            return 'chirp3'
+        elif 'chirp' in name_lower:
+            return 'chirp'
+        elif 'studio' in name_lower:
             return 'studio'
+        elif 'journey' in name_lower:
+            return 'journey'
         elif 'neural2' in name_lower:
             return 'neural2'  
         elif 'wavenet' in name_lower:
@@ -518,11 +606,16 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
     def _get_voice_description(self, voice_name: str, category: str) -> str:
         """Generate voice description based on name and category."""
         descriptions = {
-            'studio': 'Premium quality for long-form content',
-            'neural2': 'High-quality neural voice with natural sound',
-            'wavenet': 'DeepMind WaveNet technology voice',
-            'neural': 'Neural network-based voice',
-            'standard': 'Standard concatenative voice'
+            'chirp3hd': 'Chirp 3: HD - Ultra-realistic voice with emotional depth',
+            'chirphd': 'Chirp HD - High-definition natural voice',
+            'chirp3': 'Chirp 3 - Advanced conversational voice',
+            'chirp': 'Chirp - Natural conversational voice',
+            'studio': 'Studio - Premium quality for long-form content',
+            'journey': 'Journey - Experimental advanced voice',
+            'neural2': 'Neural2 - High-quality neural voice with natural sound',
+            'wavenet': 'WaveNet - DeepMind WaveNet technology voice',
+            'neural': 'Neural - Neural network-based voice',
+            'standard': 'Standard - Basic concatenative voice'
         }
         return descriptions.get(category, 'Google Cloud TTS voice')
     
@@ -560,6 +653,64 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
         if len(parts) >= 2:
             return f"{parts[0]}-{parts[1]}"
         return "en-US"  # Default fallback
+    
+    def _detect_voice_type(self, voice_id: str) -> Optional[str]:
+        """
+        Detect voice type from voice ID.
+        
+        Returns:
+            Voice type (Standard, WaveNet, Neural2, Studio, Journey, Chirp3HD, Polyglot, News) or None
+        """
+        voice_id_upper = voice_id.upper()
+        
+        # Check for specific voice types in the voice ID
+        # Order matters - check most specific first
+        if ('CHIRP3HD' in voice_id_upper or 'CHIRP-3-HD' in voice_id_upper or 
+            'CHIRP3-HD' in voice_id_upper):
+            return 'Chirp3HD'
+        elif 'CHIRPHD' in voice_id_upper or 'CHIRP-HD' in voice_id_upper:
+            return 'ChirpHD'
+        elif 'CHIRP3' in voice_id_upper:
+            return 'Chirp3'
+        elif 'CHIRP' in voice_id_upper:
+            return 'Chirp'
+        elif 'STUDIO' in voice_id_upper:
+            return 'Studio'
+        elif 'JOURNEY' in voice_id_upper:
+            return 'Journey'
+        elif 'NEURAL2' in voice_id_upper:
+            return 'Neural2'
+        elif 'WAVENET' in voice_id_upper:
+            return 'WaveNet'
+        elif 'POLYGLOT' in voice_id_upper:
+            return 'Polyglot'
+        elif 'NEWS' in voice_id_upper:
+            return 'News'
+        elif 'STANDARD' in voice_id_upper:
+            return 'Standard'
+        
+        # Default to None if no specific type detected
+        return None
+    
+    def _get_voice_model(self, voice_type: Optional[str]) -> Optional[str]:
+        """
+        Get the model parameter for specific voice types.
+        
+        Only Studio and Journey voices require model parameter.
+        Chirp voices work with standard VoiceSelectionParams.
+        
+        Returns:
+            Model name for API or None
+        """
+        if voice_type == 'Studio':
+            return 'studio'
+        elif voice_type == 'Journey':
+            return 'journey'
+        
+        # Chirp voices (Chirp3HD, ChirpHD, Chirp3, Chirp) don't need model parameter
+        # They work with standard VoiceSelectionParams
+        # Other voice types (Neural2, WaveNet, Standard, etc.) also don't need model parameter
+        return None
     
     def _get_audio_encoding(self, quality: str):
         """Get Google TTS audio encoding based on quality."""

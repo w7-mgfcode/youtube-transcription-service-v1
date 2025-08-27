@@ -558,12 +558,29 @@ def show_dubbing_cost_estimate(dubbing_service, transcript_length: int, preferen
         from ..models.dubbing import DubbingRequest, TTSProviderEnum, TranslationContextEnum
         from pydantic import HttpUrl
         
+        # Ensure proper DubbingRequest validation
+        enable_synthesis = preferences.get('enable_synthesis', False)
+        enable_video_muxing = preferences.get('enable_video_muxing', False)
+        voice_id = preferences.get('voice_id', None)
+        
+        # Provide default voice_id if synthesis is enabled but no voice selected yet
+        if enable_synthesis and not voice_id:
+            # Use provider-specific default voice for cost estimation
+            tts_provider = preferences.get('tts_provider', TTSProviderEnum.AUTO)
+            if tts_provider == TTSProviderEnum.GOOGLE_TTS:
+                voice_id = "hu-HU-Wavenet-A"  # Default Hungarian voice
+            elif tts_provider == TTSProviderEnum.ELEVENLABS:
+                voice_id = "pNInz6obpgDQGcFmaJgB"  # Default ElevenLabs voice
+            else:
+                voice_id = "auto-selected"  # Placeholder for auto selection
+        
         dummy_request = DubbingRequest(
             url=HttpUrl("https://youtube.com/watch?v=dummy"),
             enable_translation=True,
             target_language=preferences.get('target_language', 'en-US'),
-            enable_synthesis=preferences.get('enable_synthesis', False),
-            enable_video_muxing=preferences.get('enable_video_muxing', False),
+            enable_synthesis=enable_synthesis,
+            enable_video_muxing=enable_video_muxing,
+            voice_id=voice_id,
             tts_provider=preferences.get('tts_provider', TTSProviderEnum.AUTO),
             translation_context=TranslationContextEnum.CASUAL,
             existing_transcript="x" * transcript_length  # Mock transcript for length
