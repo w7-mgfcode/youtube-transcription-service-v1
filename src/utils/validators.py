@@ -134,53 +134,125 @@ def extract_video_id(url: str) -> Optional[str]:
 
 def get_dubbing_preferences() -> Optional[Dict]:
     """
-    Get user preferences for dubbing workflow.
+    Get user preferences for dubbing workflow with enhanced error handling.
     
     Returns:
         Dictionary with dubbing preferences or None if dubbing not wanted
     """
-    print(Colors.BOLD + "\n" + "="*60 + Colors.ENDC)
-    print(Colors.BOLD + Colors.CYAN + "        🎬 MULTILINGUAL DUBBING OPCIÓK" + Colors.ENDC)
-    print(Colors.BOLD + "="*60 + Colors.ENDC)
-    
-    # Ask if user wants dubbing
-    enable_dubbing = input(Colors.BOLD + "\n🌍 Szeretnéd a videót szinkronizálni más nyelvre? [i/n]: " + Colors.ENDC).lower().strip()
-    
-    if enable_dubbing != 'i':
+    try:
+        print(Colors.BOLD + "\n" + "="*60 + Colors.ENDC)
+        print(Colors.BOLD + Colors.CYAN + "        🎬 MULTILINGUAL DUBBING OPCIÓK" + Colors.ENDC)
+        print(Colors.BOLD + "="*60 + Colors.ENDC)
+        
+        # Ask if user wants dubbing with better error handling
+        try:
+            enable_dubbing = input(Colors.BOLD + "\n🌍 Szeretnéd a videót szinkronizálni más nyelvre? [i/n]: " + Colors.ENDC).lower().strip()
+        except (EOFError, KeyboardInterrupt):
+            print(Colors.WARNING + "\n⚠ Megszakítva. Szinkronizálás kihagyva." + Colors.ENDC)
+            return None
+        
+        if enable_dubbing != 'i':
+            print(Colors.CYAN + "✓ Szinkronizálás kihagyva." + Colors.ENDC)
+            return None
+        
+        print(Colors.GREEN + "✅ Szinkronizálás engedélyezve. Beállítások konfigurálása..." + Colors.ENDC)
+        preferences = {}
+        
+        # Get target language with error handling
+        try:
+            print(Colors.CYAN + "\n📍 1. lépés: Célnyelv kiválasztása" + Colors.ENDC)
+            target_language = get_target_language()
+            preferences['target_language'] = target_language
+            print(Colors.GREEN + f"✓ Célnyelv beállítva: {target_language}" + Colors.ENDC)
+        except Exception as e:
+            print(Colors.WARNING + f"⚠ Célnyelv kiválasztás hiba: {e}. Angol (US) használva." + Colors.ENDC)
+            preferences['target_language'] = 'en-US'
+        
+        # Get translation context with error handling
+        try:
+            print(Colors.CYAN + "\n📍 2. lépés: Fordítási kontextus" + Colors.ENDC)
+            context = get_translation_context()
+            preferences['translation_context'] = context
+            print(Colors.GREEN + f"✓ Kontextus beállítva: {context}" + Colors.ENDC)
+        except Exception as e:
+            print(Colors.WARNING + f"⚠ Kontextus kiválasztás hiba: {e}. Casual használva." + Colors.ENDC)
+            preferences['translation_context'] = 'casual'
+        
+        # Ask about voice synthesis with error handling
+        try:
+            print(Colors.CYAN + "\n📍 3. lépés: Hangszintézis opciók" + Colors.ENDC)
+            enable_voice = input(Colors.BOLD + "🎤 Szeretnél hangszintézist is? [i/n]: " + Colors.ENDC).lower().strip()
+            preferences['enable_synthesis'] = (enable_voice == 'i')
+            
+            if preferences['enable_synthesis']:
+                print(Colors.GREEN + "✅ Hangszintézis engedélyezve" + Colors.ENDC)
+                
+                # TTS provider selection with error handling
+                try:
+                    print(Colors.CYAN + "\n📍 4. lépés: TTS szolgáltató kiválasztása" + Colors.ENDC)
+                    preferences['tts_provider'] = get_tts_provider_selection()
+                    print(Colors.GREEN + f"✓ TTS provider beállítva: {preferences['tts_provider']}" + Colors.ENDC)
+                except Exception as e:
+                    print(Colors.WARNING + f"⚠ TTS provider hiba: {e}. AUTO használva." + Colors.ENDC)
+                    preferences['tts_provider'] = TTSProviderEnum.AUTO
+                
+                # Voice selection will be handled separately
+                preferences['voice_id'] = None
+                
+                # Ask about video muxing with error handling
+                try:
+                    enable_video = input(Colors.BOLD + "🎞️  Szeretnéd a végleges szinkronizált videót? [i/n]: " + Colors.ENDC).lower().strip()
+                    preferences['enable_video_muxing'] = (enable_video == 'i')
+                    
+                    if preferences['enable_video_muxing']:
+                        print(Colors.GREEN + "✅ Videó szinkronizálás engedélyezve" + Colors.ENDC)
+                    else:
+                        print(Colors.CYAN + "✓ Csak hang szintézis (videó nélkül)" + Colors.ENDC)
+                except (EOFError, KeyboardInterrupt):
+                    print(Colors.WARNING + "⚠ Megszakítva. Videó muxing kihagyva." + Colors.ENDC)
+                    preferences['enable_video_muxing'] = False
+            else:
+                print(Colors.CYAN + "✓ Csak fordítás (hang nélkül)" + Colors.ENDC)
+                preferences['enable_video_muxing'] = False
+                
+        except (EOFError, KeyboardInterrupt):
+            print(Colors.WARNING + "⚠ Megszakítva. Hangszintézis kihagyva." + Colors.ENDC)
+            preferences['enable_synthesis'] = False
+            preferences['enable_video_muxing'] = False
+        
+        # Ask about preview mode with error handling
+        try:
+            preview_only = input(Colors.BOLD + "🔍 Csak előnézet mód? (gyorsabb, csak hang) [i/n]: " + Colors.ENDC).lower().strip()
+            preferences['preview_mode'] = (preview_only == 'i')
+            
+            if preferences['preview_mode']:
+                print(Colors.YELLOW + "⚡ Előnézet mód aktív - gyors feldolgozás" + Colors.ENDC)
+            else:
+                print(Colors.GREEN + "🎬 Teljes feldolgozás mód" + Colors.ENDC)
+                
+        except (EOFError, KeyboardInterrupt):
+            print(Colors.WARNING + "⚠ Megszakítva. Standard mód használva." + Colors.ENDC)
+            preferences['preview_mode'] = False
+        
+        # Show final configuration summary
+        print(Colors.BOLD + "\n" + "="*50 + Colors.ENDC)
+        print(Colors.BOLD + Colors.GREEN + "        📋 VÉGSŐ KONFIGURÁCIÓ" + Colors.ENDC)
+        print(Colors.BOLD + "="*50 + Colors.ENDC)
+        print(Colors.CYAN + f"🌍 Célnyelv: {preferences['target_language']}" + Colors.ENDC)
+        print(Colors.CYAN + f"🎯 Kontextus: {preferences['translation_context']}" + Colors.ENDC)
+        print(Colors.CYAN + f"🎤 Hangszintézis: {'Igen' if preferences['enable_synthesis'] else 'Nem'}" + Colors.ENDC)
+        if preferences['enable_synthesis']:
+            print(Colors.CYAN + f"🔧 TTS Provider: {preferences['tts_provider']}" + Colors.ENDC)
+        print(Colors.CYAN + f"🎞️  Videó szinkronizálás: {'Igen' if preferences['enable_video_muxing'] else 'Nem'}" + Colors.ENDC)
+        print(Colors.CYAN + f"⚡ Előnézet mód: {'Igen' if preferences['preview_mode'] else 'Nem'}" + Colors.ENDC)
+        print(Colors.BOLD + "="*50 + Colors.ENDC)
+        
+        return preferences
+        
+    except Exception as e:
+        print(Colors.FAIL + f"\n✗ Kritikus hiba a dubbing beállítások lekérésekor: {e}" + Colors.ENDC)
+        print(Colors.WARNING + "Szinkronizálás kihagyva." + Colors.ENDC)
         return None
-    
-    preferences = {}
-    
-    # Get target language
-    target_language = get_target_language()
-    preferences['target_language'] = target_language
-    
-    # Get translation context
-    context = get_translation_context()
-    preferences['translation_context'] = context
-    
-    # Ask about voice synthesis
-    enable_voice = input(Colors.BOLD + "🎤 Szeretnél hangszintézist is? [i/n]: " + Colors.ENDC).lower().strip()
-    preferences['enable_synthesis'] = (enable_voice == 'i')
-    
-    if preferences['enable_synthesis']:
-        # TTS provider selection
-        preferences['tts_provider'] = get_tts_provider_selection()
-        
-        # Voice selection will be handled separately
-        preferences['voice_id'] = None
-        
-        # Ask about video muxing
-        enable_video = input(Colors.BOLD + "🎞️  Szeretnéd a végleges szinkronizált videót? [i/n]: " + Colors.ENDC).lower().strip()
-        preferences['enable_video_muxing'] = (enable_video == 'i')
-    else:
-        preferences['enable_video_muxing'] = False
-    
-    # Ask about preview mode
-    preview_only = input(Colors.BOLD + "🔍 Csak előnézet mód? (gyorsabb, csak hang) [i/n]: " + Colors.ENDC).lower().strip()
-    preferences['preview_mode'] = (preview_only == 'i')
-    
-    return preferences
 
 
 def get_target_language() -> str:
@@ -296,7 +368,7 @@ def get_translation_context() -> str:
 
 def get_tts_provider_selection() -> TTSProviderEnum:
     """
-    Get TTS provider selection from user with Hungarian interface.
+    Get TTS provider selection from user with Hungarian interface and enhanced error handling.
     
     Returns:
         Selected TTS provider enum
@@ -306,14 +378,29 @@ def get_tts_provider_selection() -> TTSProviderEnum:
         print(Colors.BOLD + Colors.CYAN + "        🎤 TTS SZOLGÁLTATÓ KIVÁLASZTÁSA" + Colors.ENDC)
         print(Colors.BOLD + "="*60 + Colors.ENDC)
         
-        # Get provider information and costs
-        provider_info = TTSFactory.get_provider_info()
-        available_providers = TTSFactory.get_available_providers()
+        # Get provider information and costs with error handling
+        try:
+            provider_info = TTSFactory.get_provider_info()
+            available_providers = TTSFactory.get_available_providers()
+            
+            print(Colors.CYAN + f"\n🔍 {len(available_providers)} elérhető szolgáltató találva..." + Colors.ENDC)
+            
+            # Check if any providers are available
+            if not available_providers:
+                print(Colors.WARNING + "⚠ Nincsenek elérhető TTS szolgáltatók!" + Colors.ENDC)
+                print(Colors.CYAN + "Automatikus kiválasztás használva (fallback)." + Colors.ENDC)
+                return TTSProviderEnum.AUTO
+                
+        except Exception as e:
+            print(Colors.WARNING + f"⚠ TTS szolgáltatók lekérése sikertelen: {e}" + Colors.ENDC)
+            print(Colors.CYAN + "Automatikus kiválasztás használva (fallback)." + Colors.ENDC)
+            return TTSProviderEnum.AUTO
         
         print(Colors.CYAN + "\n📊 Elérhető TTS szolgáltatók:" + Colors.ENDC)
         print()
         
         providers_menu = []
+        available_count = 0
         
         # Show available providers with status and costs
         for i, (provider_id, info) in enumerate(provider_info.items(), 1):
@@ -321,18 +408,30 @@ def get_tts_provider_selection() -> TTSProviderEnum:
             cost = f"${info['cost_per_1k_chars']:.4f}/1K karakter" if info["available"] else "N/A"
             voice_count = f"{info['voice_count']} hang" if info["available"] else "N/A"
             
+            if info["available"]:
+                available_count += 1
+            
             if provider_id == "elevenlabs":
                 name = "ElevenLabs - Prémium neurális hangok"
-                note = "(drága, de kiváló minőség)"
+                note = "(drága, de kiváló minőség)" if info["available"] else "(nem elérhető)"
             elif provider_id == "google_tts":
                 name = "Google Cloud TTS - Kiváló minőség"
-                savings = 90 if info["available"] and provider_info.get("elevenlabs", {}).get("cost_per_1k_chars", 0) > 0 else 0
-                note = f"(90%+ olcsóbb)" if savings > 0 else "(költséghatékony)"
+                if info["available"] and provider_info.get("elevenlabs", {}).get("available", False):
+                    elevenlabs_cost = provider_info.get("elevenlabs", {}).get("cost_per_1k_chars", 0)
+                    google_cost = info.get("cost_per_1k_chars", 0)
+                    if elevenlabs_cost > 0 and google_cost > 0:
+                        savings = ((elevenlabs_cost - google_cost) / elevenlabs_cost) * 100
+                        note = f"({savings:.0f}%+ olcsóbb)"
+                    else:
+                        note = "(költséghatékony)"
+                else:
+                    note = "(nem elérhető)" if not info["available"] else "(költséghatékony)"
             else:
-                name = info["name"]
+                name = info.get("name", "Ismeretlen szolgáltató")
                 note = ""
             
-            print(f"{status} {i}. {name}")
+            color = Colors.GREEN if info["available"] else Colors.FAIL
+            print(color + f"{status} {i}. {name}" + Colors.ENDC)
             print(f"      💰 Költség: {cost}")
             print(f"      🎭 Hangok: {voice_count} {note}")
             
@@ -342,35 +441,56 @@ def get_tts_provider_selection() -> TTSProviderEnum:
             print()
             providers_menu.append((provider_id, info["available"]))
         
+        # Check if we have at least one available provider
+        if available_count == 0:
+            print(Colors.FAIL + "❌ Egyetlen TTS szolgáltató sem elérhető!" + Colors.ENDC)
+            print(Colors.WARNING + "Kérlek ellenőrizd a konfigurációt és a hálózati kapcsolatot." + Colors.ENDC)
+            print(Colors.CYAN + "Automatikus kiválasztás használva (alapértelmezett fallback)." + Colors.ENDC)
+            return TTSProviderEnum.AUTO
+        
         # Auto-selection option
-        print(f"✨ {len(providers_menu) + 1}. Automatikus kiválasztás költség alapján")
+        print(Colors.BOLD + f"✨ {len(providers_menu) + 1}. Automatikus kiválasztás költség alapján" + Colors.ENDC)
         print("      🤖 A rendszer automatikusan a legköltséghatékonyabb szolgáltatót választja")
         print()
         
         # Show cost comparison if both providers are available
-        if len(available_providers) >= 2:
+        if available_count >= 2:
             print(Colors.GREEN + "💡 Költség összehasonlítás (1000 karakterre):" + Colors.ENDC)
-            elevenlabs_cost = provider_info.get("elevenlabs", {}).get("cost_per_1k_chars", 0)
-            google_cost = provider_info.get("google_tts", {}).get("cost_per_1k_chars", 0)
+            elevenlabs_cost = provider_info.get("elevenlabs", {}).get("cost_per_1k_chars", 0) if provider_info.get("elevenlabs", {}).get("available", False) else 0
+            google_cost = provider_info.get("google_tts", {}).get("cost_per_1k_chars", 0) if provider_info.get("google_tts", {}).get("available", False) else 0
             
+            if elevenlabs_cost > 0:
+                print(f"    ElevenLabs: ${elevenlabs_cost:.4f}")
+            if google_cost > 0:
+                print(f"    Google TTS: ${google_cost:.4f}")
+                
             if elevenlabs_cost > 0 and google_cost > 0:
                 savings = ((elevenlabs_cost - google_cost) / elevenlabs_cost) * 100
-                print(f"    ElevenLabs: ${elevenlabs_cost:.4f}")
-                print(f"    Google TTS: ${google_cost:.4f}")
-                print(Colors.GREEN + f"    💰 Megtakarítás: {savings:.1f}%" + Colors.ENDC)
+                recommended = "Google TTS" if google_cost < elevenlabs_cost else "ElevenLabs"
+                print(Colors.GREEN + f"    💰 Legjobb választás: {recommended} ({abs(savings):.1f}% {'megtakarítás' if savings > 0 else 'drágább'})" + Colors.ENDC)
             print()
         
+        # User selection loop with improved error handling
         while True:
             try:
                 max_choice = len(providers_menu) + 1
-                print(Colors.BOLD + f"Választás [1-{max_choice}, Enter = automatikus]: " + Colors.ENDC, end="")
-                response = input().strip()
+                prompt = Colors.BOLD + f"Választás [1-{max_choice}, Enter = automatikus]: " + Colors.ENDC
+                
+                try:
+                    response = input(prompt).strip()
+                except (EOFError, KeyboardInterrupt):
+                    print(Colors.WARNING + "\n⚠ Megszakítva. Automatikus kiválasztás használva." + Colors.ENDC)
+                    return TTSProviderEnum.AUTO
                 
                 if response == "":
                     print(Colors.GREEN + "✓ Automatikus kiválasztás (költség alapú optimalizálás)" + Colors.ENDC)
                     return TTSProviderEnum.AUTO
                 
-                choice = int(response)
+                try:
+                    choice = int(response)
+                except ValueError:
+                    print(Colors.WARNING + "⚠ Kérlek érvényes számot adj meg!" + Colors.ENDC)
+                    continue
                 
                 if choice == max_choice:
                     print(Colors.GREEN + "✓ Automatikus kiválasztás (költség alapú optimalizálás)" + Colors.ENDC)
@@ -379,33 +499,39 @@ def get_tts_provider_selection() -> TTSProviderEnum:
                     provider_id, available = providers_menu[choice - 1]
                     
                     if not available:
-                        print(Colors.WARNING + f"⚠ A {provider_id} szolgáltató nem elérhető. Válassz másikat!" + Colors.ENDC)
+                        provider_name = provider_info.get(provider_id, {}).get("name", provider_id)
+                        print(Colors.WARNING + f"⚠ A {provider_name} szolgáltató nem elérhető. Válassz másikat!" + Colors.ENDC)
                         continue
                     
-                    if provider_id == "elevenlabs":
-                        provider_enum = TTSProviderEnum.ELEVENLABS
-                        name = "ElevenLabs"
-                    elif provider_id == "google_tts":
-                        provider_enum = TTSProviderEnum.GOOGLE_TTS  
-                        name = "Google Cloud TTS"
-                    else:
-                        provider_enum = TTSProviderEnum.AUTO
-                        name = "Auto"
+                    # Map provider ID to enum
+                    provider_mapping = {
+                        "elevenlabs": (TTSProviderEnum.ELEVENLABS, "ElevenLabs"),
+                        "google_tts": (TTSProviderEnum.GOOGLE_TTS, "Google Cloud TTS")
+                    }
                     
-                    print(Colors.GREEN + f"✓ Kiválasztva: {name}" + Colors.ENDC)
-                    return provider_enum
+                    if provider_id in provider_mapping:
+                        provider_enum, name = provider_mapping[provider_id]
+                        print(Colors.GREEN + f"✓ Kiválasztva: {name}" + Colors.ENDC)
+                        
+                        # Show additional info about the selected provider
+                        cost = provider_info[provider_id].get('cost_per_1k_chars', 0)
+                        if cost > 0:
+                            print(Colors.CYAN + f"  💰 Költség: ${cost:.4f}/1K karakter" + Colors.ENDC)
+                        
+                        return provider_enum
+                    else:
+                        print(Colors.WARNING + f"⚠ Ismeretlen szolgáltató: {provider_id}. Automatikus használva." + Colors.ENDC)
+                        return TTSProviderEnum.AUTO
                 else:
                     print(Colors.WARNING + f"⚠ Kérlek 1 és {max_choice} közötti számot válassz!" + Colors.ENDC)
                     
-            except ValueError:
-                print(Colors.WARNING + "⚠ Kérlek érvényes számot adj meg!" + Colors.ENDC)
-            except KeyboardInterrupt:
-                print(Colors.WARNING + "\n⚠ Megszakítva. Automatikus kiválasztás használva." + Colors.ENDC)
-                return TTSProviderEnum.AUTO
+            except Exception as inner_e:
+                print(Colors.WARNING + f"⚠ Hiba a választás során: {inner_e}. Próbáld újra." + Colors.ENDC)
+                continue
                 
     except Exception as e:
-        print(Colors.WARNING + f"⚠ TTS szolgáltató kiválasztás sikertelen: {e}" + Colors.ENDC)
-        print(Colors.CYAN + "Automatikus kiválasztás használva." + Colors.ENDC)
+        print(Colors.FAIL + f"✗ Kritikus hiba a TTS szolgáltató kiválasztáskor: {e}" + Colors.ENDC)
+        print(Colors.WARNING + "Automatikus kiválasztás használva (fallback)." + Colors.ENDC)
         return TTSProviderEnum.AUTO
 
 
@@ -541,7 +667,7 @@ def get_voice_selection(synthesizer, tts_provider: TTSProviderEnum = TTSProvider
 
 def show_dubbing_cost_estimate(dubbing_service, transcript_length: int, preferences: Dict) -> bool:
     """
-    Show cost estimation for dubbing and get user confirmation.
+    Show cost estimation for dubbing and get user confirmation with enhanced error handling.
     
     Args:
         dubbing_service: DubbingService instance
@@ -554,82 +680,224 @@ def show_dubbing_cost_estimate(dubbing_service, transcript_length: int, preferen
     try:
         print(Colors.CYAN + "\n💰 Költségbecslés számítása..." + Colors.ENDC)
         
-        # Create a minimal DubbingRequest for cost estimation
-        from ..models.dubbing import DubbingRequest, TTSProviderEnum, TranslationContextEnum
-        from pydantic import HttpUrl
+        # Validate inputs first
+        if not dubbing_service:
+            print(Colors.WARNING + "⚠ DubbingService nem elérhető. Alapértelmezett becslés használva." + Colors.ENDC)
+            return _show_fallback_cost_estimate(transcript_length, preferences)
         
-        # Ensure proper DubbingRequest validation
-        enable_synthesis = preferences.get('enable_synthesis', False)
-        enable_video_muxing = preferences.get('enable_video_muxing', False)
-        voice_id = preferences.get('voice_id', None)
+        if transcript_length <= 0:
+            print(Colors.WARNING + "⚠ Érvénytelen transcript hossz. Alapértelmezett becslés használva." + Colors.ENDC)
+            return _show_fallback_cost_estimate(1000, preferences)  # Use 1000 chars as fallback
         
-        # Provide default voice_id if synthesis is enabled but no voice selected yet
-        if enable_synthesis and not voice_id:
-            # Use provider-specific default voice for cost estimation
+        # Create a minimal DubbingRequest for cost estimation with error handling
+        try:
+            from ..models.dubbing import DubbingRequest, TTSProviderEnum, TranslationContextEnum
+            from pydantic import HttpUrl
+            
+            # Safely extract preferences with defaults
+            enable_synthesis = preferences.get('enable_synthesis', False)
+            enable_video_muxing = preferences.get('enable_video_muxing', False)
+            voice_id = preferences.get('voice_id', None)
+            target_language = preferences.get('target_language', 'en-US')
             tts_provider = preferences.get('tts_provider', TTSProviderEnum.AUTO)
-            if tts_provider == TTSProviderEnum.GOOGLE_TTS:
-                voice_id = "hu-HU-Wavenet-A"  # Default Hungarian voice
-            elif tts_provider == TTSProviderEnum.ELEVENLABS:
-                voice_id = "pNInz6obpgDQGcFmaJgB"  # Default ElevenLabs voice
-            else:
-                voice_id = "auto-selected"  # Placeholder for auto selection
+            translation_context = preferences.get('translation_context', 'casual')
+            
+            # Map string context to enum if needed
+            context_map = {
+                'casual': TranslationContextEnum.CASUAL,
+                'educational': TranslationContextEnum.EDUCATIONAL,
+                'marketing': TranslationContextEnum.MARKETING,
+                'spiritual': TranslationContextEnum.SPIRITUAL,
+                'legal': TranslationContextEnum.LEGAL,
+                'news': TranslationContextEnum.NEWS,
+                'scientific': TranslationContextEnum.SCIENTIFIC
+            }
+            
+            if isinstance(translation_context, str):
+                translation_context = context_map.get(translation_context, TranslationContextEnum.CASUAL)
+            
+            print(Colors.CYAN + f"📊 Beállítások: {target_language} | {'Hang: ' + str(tts_provider) if enable_synthesis else 'Csak fordítás'} | {'Videó ✓' if enable_video_muxing else 'Csak hang'}" + Colors.ENDC)
+            
+            # Provide default voice_id if synthesis is enabled but no voice selected yet
+            if enable_synthesis and not voice_id:
+                # Use provider-specific default voice for cost estimation
+                if tts_provider == TTSProviderEnum.GOOGLE_TTS:
+                    voice_id = "en-US-Neural2-F" if target_language.startswith('en') else "hu-HU-Wavenet-A"
+                elif tts_provider == TTSProviderEnum.ELEVENLABS:
+                    voice_id = "pNInz6obpgDQGcFmaJgB"  # Default ElevenLabs voice
+                else:
+                    voice_id = "auto-selected"  # Placeholder for auto selection
+                    
+                print(Colors.CYAN + f"🎤 Hang becsléshez: {voice_id}" + Colors.ENDC)
+            
+            dummy_request = DubbingRequest(
+                url=HttpUrl("https://youtube.com/watch?v=dummy"),
+                enable_translation=True,
+                target_language=target_language,
+                enable_synthesis=enable_synthesis,
+                enable_video_muxing=enable_video_muxing,
+                voice_id=voice_id,
+                tts_provider=tts_provider,
+                translation_context=translation_context,
+                existing_transcript="x" * transcript_length  # Mock transcript for length
+            )
+            
+        except Exception as req_error:
+            print(Colors.WARNING + f"⚠ DubbingRequest létrehozás sikertelen: {req_error}" + Colors.ENDC)
+            return _show_fallback_cost_estimate(transcript_length, preferences)
         
-        dummy_request = DubbingRequest(
-            url=HttpUrl("https://youtube.com/watch?v=dummy"),
-            enable_translation=True,
-            target_language=preferences.get('target_language', 'en-US'),
-            enable_synthesis=enable_synthesis,
-            enable_video_muxing=enable_video_muxing,
-            voice_id=voice_id,
-            tts_provider=preferences.get('tts_provider', TTSProviderEnum.AUTO),
-            translation_context=TranslationContextEnum.CASUAL,
-            existing_transcript="x" * transcript_length  # Mock transcript for length
-        )
+        # Try to get estimate from dubbing service
+        try:
+            print(Colors.CYAN + "🧮 Költség számítás..." + Colors.ENDC)
+            estimate = dubbing_service.estimate_dubbing_cost(dummy_request)
+            
+            if not estimate or not isinstance(estimate, dict):
+                print(Colors.WARNING + "⚠ Érvénytelen költségbecslés eredmény." + Colors.ENDC)
+                return _show_fallback_cost_estimate(transcript_length, preferences)
+                
+        except Exception as estimate_error:
+            print(Colors.WARNING + f"⚠ Költségbecslés szolgáltatás hiba: {estimate_error}" + Colors.ENDC)
+            return _show_fallback_cost_estimate(transcript_length, preferences)
         
-        estimate = dubbing_service.estimate_dubbing_cost(dummy_request)
-        
+        # Display results
         print(Colors.YELLOW + "\n" + "="*50 + Colors.ENDC)
         print(Colors.YELLOW + "              💰 KÖLTSÉGBECSLÉS" + Colors.ENDC)
         print(Colors.YELLOW + "="*50 + Colors.ENDC)
         
         print(Colors.CYAN + f"📝 Átirat hossza: {transcript_length:,} karakter" + Colors.ENDC)
         
-        # Show breakdown
+        # Show breakdown with error handling
         breakdown = estimate.get('breakdown', {})
-        if breakdown:
+        if breakdown and isinstance(breakdown, dict):
             print(Colors.CYAN + "\n💸 Költség lebontás:" + Colors.ENDC)
             
             if 'translation_cost' in breakdown:
-                print(Colors.CYAN + f"   ├─ Fordítás: ${breakdown['translation_cost']:.4f}" + Colors.ENDC)
+                trans_cost = breakdown['translation_cost']
+                if isinstance(trans_cost, (int, float)) and trans_cost >= 0:
+                    print(Colors.CYAN + f"   ├─ Fordítás: ${trans_cost:.4f}" + Colors.ENDC)
             
             if 'synthesis_cost' in breakdown:
-                print(Colors.CYAN + f"   ├─ Hangszintézis: ${breakdown['synthesis_cost']:.4f}" + Colors.ENDC)
+                synth_cost = breakdown['synthesis_cost']
+                if isinstance(synth_cost, (int, float)) and synth_cost >= 0:
+                    print(Colors.CYAN + f"   ├─ Hangszintézis: ${synth_cost:.4f}" + Colors.ENDC)
             
             if 'processing_cost' in breakdown:
-                print(Colors.CYAN + f"   └─ Videó feldolgozás: ${breakdown['processing_cost']:.4f}" + Colors.ENDC)
+                proc_cost = breakdown['processing_cost']
+                if isinstance(proc_cost, (int, float)) and proc_cost >= 0:
+                    print(Colors.CYAN + f"   └─ Videó feldolgozás: ${proc_cost:.4f}" + Colors.ENDC)
         
         total_cost = estimate.get('total_cost_usd', 0.0)
         processing_time = estimate.get('estimated_time_minutes', 5)
+        
+        # Validate cost values
+        if not isinstance(total_cost, (int, float)) or total_cost < 0:
+            total_cost = 0.0
+            
+        if not isinstance(processing_time, (int, float)) or processing_time <= 0:
+            processing_time = 5.0
         
         print(Colors.BOLD + Colors.GREEN + f"\n💵 Teljes költség: ${total_cost:.4f}" + Colors.ENDC)
         print(Colors.CYAN + f"⏱️  Becsült idő: {processing_time:.1f} perc" + Colors.ENDC)
         
         print(Colors.YELLOW + "="*50 + Colors.ENDC)
         
-        # Get confirmation
-        if total_cost > 0.05:  # Show warning for costs over 5 cents
-            print(Colors.WARNING + f"\nFigyelem: A szinkronizálás költsége ${total_cost:.4f} lesz." + Colors.ENDC)
-        
-        response = input(Colors.BOLD + "Folytatod a szinkronizálást? (i/n) [i]: " + Colors.ENDC).strip().lower()
-        
-        if response and response.startswith('n'):
-            print(Colors.WARNING + "Szinkronizálás megszakítva." + Colors.ENDC)
-            return False
+        # Get confirmation with error handling
+        try:
+            if total_cost > 0.05:  # Show warning for costs over 5 cents
+                print(Colors.WARNING + f"\nFigyelem: A szinkronizálás költsége ${total_cost:.4f} lesz." + Colors.ENDC)
+            else:
+                print(Colors.GREEN + "\n✅ Költséghatékony feldolgozás (< $0.05)" + Colors.ENDC)
             
-        print(Colors.GREEN + "✓ Szinkronizálás jóváhagyva" + Colors.ENDC)
-        return True
+            try:
+                response = input(Colors.BOLD + "Folytatod a szinkronizálást? (i/n) [i]: " + Colors.ENDC).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print(Colors.WARNING + "\n⚠ Megszakítva. Szinkronizálás kihagyva." + Colors.ENDC)
+                return False
+            
+            if response and response.startswith('n'):
+                print(Colors.WARNING + "Szinkronizálás megszakítva felhasználó által." + Colors.ENDC)
+                return False
+                
+            print(Colors.GREEN + "✓ Szinkronizálás jóváhagyva" + Colors.ENDC)
+            return True
+            
+        except Exception as confirm_error:
+            print(Colors.WARNING + f"⚠ Megerősítés hiba: {confirm_error}. Folytatás..." + Colors.ENDC)
+            return True
         
     except Exception as e:
-        print(Colors.WARNING + f"⚠ Költségbecslés hiba: {e}" + Colors.ENDC)
-        print(Colors.WARNING + "Folytatás alapértelmezett becsléssel..." + Colors.ENDC)
+        print(Colors.FAIL + f"✗ Kritikus hiba a költségbecsléskor: {e}" + Colors.ENDC)
+        return _show_fallback_cost_estimate(transcript_length, preferences)
+
+
+def _show_fallback_cost_estimate(transcript_length: int, preferences: Dict) -> bool:
+    """
+    Show fallback cost estimation when main estimation fails.
+    
+    Args:
+        transcript_length: Length of transcript in characters
+        preferences: Dubbing preferences
+    
+    Returns:
+        True if user wants to proceed, False otherwise
+    """
+    try:
+        print(Colors.YELLOW + "\n" + "="*50 + Colors.ENDC)
+        print(Colors.YELLOW + "           💰 ALAPÉRTELMEZETT BECSLÉS" + Colors.ENDC)
+        print(Colors.YELLOW + "="*50 + Colors.ENDC)
+        
+        print(Colors.CYAN + f"📝 Átirat hossza: {transcript_length:,} karakter" + Colors.ENDC)
+        
+        # Simple fallback estimation
+        enable_synthesis = preferences.get('enable_synthesis', False)
+        enable_video_muxing = preferences.get('enable_video_muxing', False)
+        
+        # Basic cost estimation (rough estimates)
+        translation_cost = transcript_length * 0.00001  # ~$0.01 per 1000 chars
+        synthesis_cost = transcript_length * 0.0003 if enable_synthesis else 0  # ~$0.30 per 1000 chars (ElevenLabs rate)
+        processing_cost = 0.01 if enable_video_muxing else 0  # Small fixed cost for video processing
+        
+        # If Google TTS is selected, use much lower rate
+        tts_provider = preferences.get('tts_provider', TTSProviderEnum.AUTO)
+        if enable_synthesis and (tts_provider == TTSProviderEnum.GOOGLE_TTS or tts_provider == TTSProviderEnum.AUTO):
+            synthesis_cost = transcript_length * 0.000016  # Google TTS rate ~$0.016 per 1000 chars
+        
+        total_cost = translation_cost + synthesis_cost + processing_cost
+        estimated_time = max(2.0, transcript_length / 200)  # Rough time estimate
+        
+        print(Colors.CYAN + "\n💸 Becslés lebontás:" + Colors.ENDC)
+        print(Colors.CYAN + f"   ├─ Fordítás: ${translation_cost:.4f}" + Colors.ENDC)
+        if enable_synthesis:
+            provider_name = "Google TTS" if tts_provider == TTSProviderEnum.GOOGLE_TTS else "TTS"
+            print(Colors.CYAN + f"   ├─ Hangszintézis ({provider_name}): ${synthesis_cost:.4f}" + Colors.ENDC)
+        if enable_video_muxing:
+            print(Colors.CYAN + f"   └─ Videó feldolgozás: ${processing_cost:.4f}" + Colors.ENDC)
+        
+        print(Colors.BOLD + Colors.GREEN + f"\n💵 Becsült teljes költség: ${total_cost:.4f}" + Colors.ENDC)
+        print(Colors.CYAN + f"⏱️  Becsült idő: {estimated_time:.1f} perc" + Colors.ENDC)
+        
+        print(Colors.WARNING + "⚠ Ez csak becslés - a tényleges költség eltérhet!" + Colors.ENDC)
+        print(Colors.YELLOW + "="*50 + Colors.ENDC)
+        
+        # Get confirmation
+        try:
+            if total_cost > 0.10:
+                print(Colors.WARNING + f"\nFigyelem: A szinkronizálás költsége körülbelül ${total_cost:.4f} lesz." + Colors.ENDC)
+            
+            response = input(Colors.BOLD + "Folytatod a szinkronizálást? (i/n) [i]: " + Colors.ENDC).strip().lower()
+            
+            if response and response.startswith('n'):
+                print(Colors.WARNING + "Szinkronizálás megszakítva." + Colors.ENDC)
+                return False
+                
+            print(Colors.GREEN + "✓ Szinkronizálás jóváhagyva (becslés alapján)" + Colors.ENDC)
+            return True
+            
+        except (EOFError, KeyboardInterrupt):
+            print(Colors.WARNING + "\n⚠ Megszakítva. Szinkronizálás kihagyva." + Colors.ENDC)
+            return False
+            
+    except Exception as e:
+        print(Colors.FAIL + f"✗ Fallback becslés is sikertelen: {e}" + Colors.ENDC)
+        print(Colors.CYAN + "Szinkronizálás folytatása alapértelmezett beállításokkal..." + Colors.ENDC)
         return True

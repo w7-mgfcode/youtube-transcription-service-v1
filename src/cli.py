@@ -313,7 +313,7 @@ class InteractiveCLI:
     def _process_dubbing_workflow(self, video_url: str, test_mode: bool, 
                                 transcript_result: dict, preferences: dict) -> dict:
         """
-        Process the complete dubbing workflow.
+        Process the complete dubbing workflow with enhanced debug information and error handling.
         
         Args:
             video_url: YouTube video URL
@@ -324,49 +324,93 @@ class InteractiveCLI:
         Returns:
             Dictionary with dubbing results
         """
+        print(Colors.BOLD + "\n" + "="*60 + Colors.ENDC)
+        print(Colors.BOLD + Colors.BLUE + "        🎬 DUBBING WORKFLOW INDÍTÁSA" + Colors.ENDC)
+        print(Colors.BOLD + "="*60 + Colors.ENDC)
+        
         try:
-            # Get transcript text for cost estimation
+            # Debug: Show current preferences
+            print(Colors.CYAN + "🔍 Debug - Dubbing beállítások:" + Colors.ENDC)
+            for key, value in preferences.items():
+                print(Colors.CYAN + f"   {key}: {value}" + Colors.ENDC)
+            
+            # Step 1: Get transcript text for cost estimation
+            print(Colors.CYAN + "\n📍 1. lépés: Átirat fájl ellenőrzése..." + Colors.ENDC)
             transcript_file = transcript_result.get("transcript_file")
             if not transcript_file:
                 print(Colors.FAIL + "✗ Nem található átirat fájl a szinkronizáláshoz" + Colors.ENDC)
-                return {}
+                return {'dubbing_status': 'failed', 'dubbing_error': 'Átirat fájl nem található'}
+            
+            print(Colors.GREEN + f"✓ Átirat fájl: {transcript_file}" + Colors.ENDC)
             
             # Read transcript for cost estimation
-            with open(transcript_file, 'r', encoding='utf-8') as f:
-                transcript_text = f.read()
+            try:
+                with open(transcript_file, 'r', encoding='utf-8') as f:
+                    transcript_text = f.read()
+                
+                print(Colors.GREEN + f"✓ Átirat betöltve: {len(transcript_text)} karakter" + Colors.ENDC)
+            except Exception as read_error:
+                print(Colors.FAIL + f"✗ Átirat fájl olvasási hiba: {read_error}" + Colors.ENDC)
+                return {'dubbing_status': 'failed', 'dubbing_error': f'Átirat olvasási hiba: {read_error}'}
             
-            # Show cost estimate and get confirmation
-            if not show_dubbing_cost_estimate(self.dubbing_service, len(transcript_text), preferences):
-                return {}
+            # Step 2: Show cost estimate and get confirmation
+            print(Colors.CYAN + "\n📍 2. lépés: Költségbecslés és jóváhagyás..." + Colors.ENDC)
+            try:
+                cost_approved = show_dubbing_cost_estimate(self.dubbing_service, len(transcript_text), preferences)
+                if not cost_approved:
+                    print(Colors.WARNING + "⚠ Költségbecslés nem jóváhagyva" + Colors.ENDC)
+                    return {'dubbing_status': 'cancelled', 'dubbing_error': 'Felhasználó által visszavonva'}
+                
+                print(Colors.GREEN + "✓ Költségbecslés jóváhagyva" + Colors.ENDC)
+            except Exception as cost_error:
+                print(Colors.WARNING + f"⚠ Költségbecslés hiba: {cost_error}. Folytatás..." + Colors.ENDC)
             
-            # Get voice selection if synthesis enabled
+            # Step 3: Get voice selection if synthesis enabled
+            print(Colors.CYAN + "\n📍 3. lépés: Hang kiválasztás..." + Colors.ENDC)
             voice_id = None
             synthesizer = None
             if preferences.get('enable_synthesis'):
+                print(Colors.CYAN + "🎤 Hangszintézis engedélyezve - hang kiválasztása..." + Colors.ENDC)
+                
                 # Get the appropriate synthesizer based on provider selection
                 tts_provider = preferences.get('tts_provider', TTSProviderEnum.AUTO)
+                print(Colors.CYAN + f"🔧 TTS Provider: {tts_provider}" + Colors.ENDC)
                 
                 try:
-                    synthesizer = TTSFactory.create_synthesizer(
-                        TTSProvider(tts_provider.value) if hasattr(tts_provider, 'value') else TTSProvider.AUTO
-                    )
-                    print(Colors.CYAN + f"\n🎤 {synthesizer.provider_name.value} hang kiválasztása..." + Colors.ENDC)
+                    # Convert to TTSProvider enum if needed
+                    if hasattr(tts_provider, 'value'):
+                        provider_enum = TTSProvider(tts_provider.value)
+                    else:
+                        provider_enum = TTSProvider.AUTO
+                    
+                    synthesizer = TTSFactory.create_synthesizer(provider_enum)
+                    print(Colors.GREEN + f"✓ TTS synthesizer inicializálva: {synthesizer.provider_name.value}" + Colors.ENDC)
                     
                     voice_id = get_voice_selection(synthesizer, tts_provider)
                     
-                    if not voice_id:
+                    if voice_id:
+                        print(Colors.GREEN + f"✓ Hang kiválasztva: {voice_id}" + Colors.ENDC)
+                    else:
                         print(Colors.WARNING + "⚠ Hang kiválasztása sikertelen, alapértelmezett hang használva" + Colors.ENDC)
                         
-                except Exception as e:
-                    print(Colors.WARNING + f"⚠ TTS provider inicializálás sikertelen: {e}" + Colors.ENDC)
-                    print(Colors.CYAN + "Visszaváltás az alapértelmezett ElevenLabs szolgáltatóra..." + Colors.ENDC)
+                except Exception as tts_error:
+                    print(Colors.WARNING + f"⚠ TTS provider inicializálás sikertelen: {tts_error}" + Colors.ENDC)
+                    print(Colors.CYAN + "🔄 Visszaváltás az alapértelmezett ElevenLabs szolgáltatóra..." + Colors.ENDC)
                     
                     # Fallback to ElevenLabs
-                    synthesizer = self.synthesizer
-                    tts_provider = TTSProviderEnum.ELEVENLABS
-                    voice_id = get_voice_selection(synthesizer, tts_provider)
+                    try:
+                        synthesizer = self.synthesizer
+                        tts_provider = TTSProviderEnum.ELEVENLABS
+                        voice_id = get_voice_selection(synthesizer, tts_provider)
+                        print(Colors.GREEN + "✓ ElevenLabs fallback sikeres" + Colors.ENDC)
+                    except Exception as fallback_error:
+                        print(Colors.WARNING + f"⚠ ElevenLabs fallback is sikertelen: {fallback_error}" + Colors.ENDC)
+                        voice_id = None
+            else:
+                print(Colors.CYAN + "🔇 Hangszintézis kihagyva" + Colors.ENDC)
             
-            # Create dubbing request
+            # Step 4: Create dubbing request
+            print(Colors.CYAN + "\n📍 4. lépés: Dubbing kérés létrehozása..." + Colors.ENDC)
             try:
                 context_map = {
                     'casual': TranslationContextEnum.CASUAL,
@@ -396,49 +440,105 @@ class InteractiveCLI:
                     existing_transcript=transcript_text
                 )
                 
-            except Exception as e:
-                print(Colors.FAIL + f"✗ Szinkronizálási kérés létrehozása sikertelen: {e}" + Colors.ENDC)
-                return {}
+                print(Colors.GREEN + "✓ Dubbing kérés sikeresen létrehozva" + Colors.ENDC)
+                print(Colors.CYAN + f"   URL: {video_url}" + Colors.ENDC)
+                print(Colors.CYAN + f"   Target: {preferences.get('target_language', 'en-US')}" + Colors.ENDC)
+                print(Colors.CYAN + f"   Synthesis: {'Igen' if preferences.get('enable_synthesis') else 'Nem'}" + Colors.ENDC)
+                print(Colors.CYAN + f"   Video mux: {'Igen' if preferences.get('enable_video_muxing') else 'Nem'}" + Colors.ENDC)
+                
+            except Exception as req_error:
+                print(Colors.FAIL + f"✗ Szinkronizálási kérés létrehozása sikertelen: {req_error}" + Colors.ENDC)
+                return {'dubbing_status': 'failed', 'dubbing_error': f'Kérés létrehozási hiba: {req_error}'}
             
-            # Define progress callback for dubbing stages
+            # Step 5: Define enhanced progress callback for dubbing stages
+            print(Colors.CYAN + "\n📍 5. lépés: Dubbing feldolgozás..." + Colors.ENDC)
+            current_stage = {'name': 'unknown', 'progress': 0}
+            
             def dubbing_progress(status: str, progress: int):
                 stage_names = {
+                    'queued': '⏳ Várakozás',
+                    'starting': '🚀 Indítás',
                     'translating': '🌍 Fordítás',
                     'synthesizing': '🎤 Hangszintézis',
                     'muxing': '🎞️  Videó összekeverés',
-                    'completed': '✅ Befejezve'
+                    'finalizing': '🔄 Finalizálás',
+                    'completed': '✅ Befejezve',
+                    'failed': '❌ Sikertelen'
                 }
                 
-                stage_name = stage_names.get(status, status)
+                stage_name = stage_names.get(status, f"🔧 {status}")
+                current_stage['name'] = status
+                current_stage['progress'] = progress
+                
                 if progress >= 0:
-                    print(f"   {stage_name}: {progress}%")
+                    print(Colors.BOLD + f"   {stage_name}: {progress}%" + Colors.ENDC)
+                else:
+                    print(Colors.CYAN + f"   {stage_name}" + Colors.ENDC)
             
-            print(Colors.BOLD + f"\n🎬 Szinkronizálás indítása..." + Colors.ENDC)
+            print(Colors.BOLD + f"🎬 Dubbing folyamat indítása..." + Colors.ENDC)
             
-            # Process dubbing
-            dubbing_result = self.dubbing_service.process_dubbing_job(
-                request=dubbing_request,
-                progress_callback=dubbing_progress
-            )
+            # Process dubbing with error tracking
+            dubbing_result = None
+            try:
+                dubbing_result = self.dubbing_service.process_dubbing_job(
+                    request=dubbing_request,
+                    progress_callback=dubbing_progress
+                )
+                
+                if dubbing_result:
+                    print(Colors.GREEN + f"\n✅ Dubbing szolgáltatás válasz érkezett: {dubbing_result.status}" + Colors.ENDC)
+                else:
+                    print(Colors.FAIL + "\n✗ Dubbing szolgáltatás None eredményt adott" + Colors.ENDC)
+                    return {'dubbing_status': 'failed', 'dubbing_error': 'Dubbing szolgáltatás nem adott eredményt'}
+                    
+            except Exception as processing_error:
+                print(Colors.FAIL + f"\n✗ Dubbing feldolgozási hiba: {processing_error}" + Colors.ENDC)
+                return {'dubbing_status': 'failed', 'dubbing_error': f'Feldolgozási hiba: {processing_error}'}
+            
+            # Step 6: Process and validate results
+            print(Colors.CYAN + "\n📍 6. lépés: Eredmények feldolgozása..." + Colors.ENDC)
             
             # Convert result to dict for merging
             result_dict = {
-                'dubbing_status': dubbing_result.status,
-                'translation_file': dubbing_result.translation_file,
-                'audio_file': dubbing_result.audio_file,
-                'video_file': dubbing_result.video_file,
-                'dubbing_cost': dubbing_result.cost_breakdown
+                'dubbing_status': dubbing_result.status if dubbing_result else 'unknown',
+                'translation_file': getattr(dubbing_result, 'translation_file', None),
+                'audio_file': getattr(dubbing_result, 'audio_file', None),
+                'video_file': getattr(dubbing_result, 'video_file', None),
+                'dubbing_cost': getattr(dubbing_result, 'cost_breakdown', None)
             }
             
-            if dubbing_result.error:
+            # Show detailed results
+            if dubbing_result and dubbing_result.status == 'completed':
+                print(Colors.GREEN + "✅ Dubbing workflow sikeresen befejezve!" + Colors.ENDC)
+                
+                if result_dict.get('translation_file'):
+                    print(Colors.GREEN + f"   📝 Fordítás: {result_dict['translation_file']}" + Colors.ENDC)
+                if result_dict.get('audio_file'):
+                    print(Colors.GREEN + f"   🎤 Hang: {result_dict['audio_file']}" + Colors.ENDC)
+                if result_dict.get('video_file'):
+                    print(Colors.GREEN + f"   🎞️  Videó: {result_dict['video_file']}" + Colors.ENDC)
+                    
+                cost_info = result_dict.get('dubbing_cost')
+                if cost_info and isinstance(cost_info, dict):
+                    total_cost = cost_info.get('total_cost_usd', 0)
+                    if total_cost > 0:
+                        print(Colors.YELLOW + f"   💰 Tényleges költség: ${total_cost:.4f}" + Colors.ENDC)
+                        
+            elif dubbing_result and dubbing_result.error:
                 result_dict['dubbing_error'] = dubbing_result.error
                 print(Colors.FAIL + f"✗ Szinkronizálási hiba: {dubbing_result.error}" + Colors.ENDC)
+            else:
+                error_msg = "Ismeretlen dubbing hiba"
+                result_dict['dubbing_error'] = error_msg
+                print(Colors.FAIL + f"✗ {error_msg}" + Colors.ENDC)
             
+            print(Colors.BOLD + "="*60 + Colors.ENDC)
             return result_dict
             
         except Exception as e:
-            print(Colors.FAIL + f"✗ Szinkronizálási folyamat hiba: {e}" + Colors.ENDC)
-            return {}
+            print(Colors.FAIL + f"\n✗ Kritikus dubbing workflow hiba: {e}" + Colors.ENDC)
+            print(Colors.BOLD + "="*60 + Colors.ENDC)
+            return {'dubbing_status': 'failed', 'dubbing_error': f'Kritikus hiba: {e}'}
     
     def _show_completion_message(self):
         """Show completion message with enhanced service features."""
