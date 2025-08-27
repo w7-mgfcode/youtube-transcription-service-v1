@@ -8,6 +8,7 @@ from .core.translator import ContextAwareTranslator
 from .core.synthesizer import ElevenLabsSynthesizer
 from .core.video_muxer import VideoMuxer
 from .core.dubbing_service import DubbingService
+from .core.postprocessor import VertexPostProcessor
 from .core.tts_factory import TTSFactory
 from .core.tts_interface import TTSProvider
 from .utils.colors import Colors, print_header
@@ -31,6 +32,7 @@ class InteractiveCLI:
         self.synthesizer = ElevenLabsSynthesizer()
         self.video_muxer = VideoMuxer()
         self.dubbing_service = DubbingService()
+        self.postprocessor = VertexPostProcessor()
     
     def run(self):
         """Run interactive CLI session."""
@@ -83,19 +85,34 @@ class InteractiveCLI:
                         else:
                             print(Colors.BLUE + f"\n🤖 Vertex AI utófeldolgozás ({selected_model})..." + Colors.ENDC)
                             
-                            # Re-process with Vertex AI
-                            vertex_result = self.transcriber.process(
-                                url=video_url,
-                                test_mode=test_mode,
-                                breath_detection=breath_detection,
-                                use_vertex_ai=True,
-                                vertex_ai_model=selected_model,
-                                progress_callback=print_progress
-                            )
-                            
-                            if vertex_result["status"] == "completed":
-                                result = vertex_result
-                                print(Colors.GREEN + "✓ Vertex AI formázás alkalmazva!" + Colors.ENDC)
+                            # Read existing transcript and apply Vertex AI post-processing only
+                            try:
+                                with open(result["transcript_file"], 'r', encoding='utf-8') as f:
+                                    transcript_text = f.read()
+                                
+                                # Apply Vertex AI post-processing to existing transcript
+                                formatted_text = self.postprocessor.process(
+                                    transcript_text=transcript_text,
+                                    video_title=result.get("title", ""),
+                                    vertex_ai_model=selected_model
+                                )
+                                
+                                if formatted_text:
+                                    # Write formatted text back to the transcript file
+                                    with open(result["transcript_file"], 'w', encoding='utf-8') as f:
+                                        f.write(formatted_text)
+                                    
+                                    # Update word count and status
+                                    result["word_count"] = len(formatted_text.split())
+                                    result["vertex_ai_used"] = True
+                                    result["vertex_ai_model"] = selected_model
+                                    print(Colors.GREEN + "✓ Vertex AI formázás alkalmazva!" + Colors.ENDC)
+                                else:
+                                    print(Colors.WARNING + "⚠ Vertex AI formázás sikertelen, eredeti szöveg megmarad" + Colors.ENDC)
+                                    
+                            except Exception as vertex_error:
+                                print(Colors.WARNING + f"⚠ Vertex AI feldolgozási hiba: {vertex_error}" + Colors.ENDC)
+                                print(Colors.CYAN + "Eredeti átirat megmarad." + Colors.ENDC)
                 
                 # Ask about dubbing
                 dubbing_preferences = get_dubbing_preferences()
@@ -108,15 +125,27 @@ class InteractiveCLI:
                         preferences=dubbing_preferences
                     )
                     
-                    if dubbing_result:
-                        # Merge dubbing results into main result
+                    # Enhanced dubbing result handling
+                    if dubbing_result and dubbing_result.get('dubbing_status') == 'completed':
+                        # Merge successful dubbing results into main result
                         result.update(dubbing_result)
                         print(Colors.GREEN + "✅ Szinkronizálás sikeres!" + Colors.ENDC)
+                        self._show_final_results(result, breath_detection)
+                    elif dubbing_result and dubbing_result.get('dubbing_status') == 'cancelled':
+                        print(Colors.CYAN + "⚠ Szinkronizálás felhasználó által megszakítva" + Colors.ENDC)
+                        self._show_final_results(result, breath_detection)  # Show transcription results
+                    elif dubbing_result and dubbing_result.get('dubbing_status') == 'failed':
+                        print(Colors.FAIL + "❌ Szinkronizálás sikertelen!" + Colors.ENDC)
+                        if dubbing_result.get('dubbing_error'):
+                            print(Colors.FAIL + f"   Hiba: {dubbing_result['dubbing_error']}" + Colors.ENDC)
+                        print(Colors.CYAN + "\n📝 Átirat feldolgozás eredménye:" + Colors.ENDC)
+                        self._show_final_results(result, breath_detection)  # Show only transcription results
                     else:
-                        print(Colors.WARNING + "⚠ Szinkronizálás részben vagy egészben sikertelen" + Colors.ENDC)
-                
-                # Show final results
-                self._show_final_results(result, breath_detection)
+                        print(Colors.WARNING + "⚠ Szinkronizálás ismeretlen állapotban fejeződött be" + Colors.ENDC)
+                        self._show_final_results(result, breath_detection)  # Show transcription results as fallback
+                else:
+                    # No dubbing requested, show transcription results
+                    self._show_final_results(result, breath_detection)
             else:
                 print(Colors.FAIL + f"\n✗ Nem sikerült átírni az audiót: {result.get('error', 'Ismeretlen hiba')}" + Colors.ENDC)
                 sys.exit(1)

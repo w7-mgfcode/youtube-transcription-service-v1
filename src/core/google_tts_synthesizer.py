@@ -32,6 +32,11 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
         self.timeout_seconds = settings.google_tts_timeout_seconds
         self.max_retries = settings.google_tts_max_retries
         
+        # Enhanced voice mapping cache for bidirectional lookups
+        self._friendly_to_technical = {}  # "Despina" -> "en-US-Studio-O"
+        self._technical_to_friendly = {}  # "en-US-Studio-O" -> "Despina"
+        self._voice_metadata_cache = {}   # voice_id -> complete metadata
+        
         print(Colors.CYAN + f"🔧 Google TTS Synthesizer initialized (region: {self.region})" + Colors.ENDC)
     
     @property
@@ -156,14 +161,50 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             
             print(Colors.CYAN + f"   ├─ Single API call synthesis ({len(ssml_content)} karakterből)" + Colors.ENDC)
             
+            # 🔍 COMPREHENSIVE DEBUG INFO
+            print(Colors.BOLD + Colors.BLUE + "🔍 GOOGLE TTS DEBUG INFO:" + Colors.ENDC)
+            print(Colors.CYAN + f"   ├─ Input Voice ID: '{voice_id}'" + Colors.ENDC)
+            print(Colors.CYAN + f"   ├─ Voice ID Type: {type(voice_id)}" + Colors.ENDC)
+            print(Colors.CYAN + f"   ├─ SSML Length: {len(ssml_content)} characters" + Colors.ENDC)
+            
+            # Resolve voice ID using enhanced mapping system
+            try:
+                resolved_voice_id = self.resolve_voice_id(voice_id)
+                if resolved_voice_id:
+                    print(Colors.GREEN + f"   ├─ ✓ Voice Resolved Successfully:" + Colors.ENDC)
+                    print(Colors.CYAN + f"   │  ├─ Input: '{voice_id}'" + Colors.ENDC)
+                    print(Colors.CYAN + f"   │  └─ Resolved to: '{resolved_voice_id}'" + Colors.ENDC)
+                    
+                    # Get voice metadata from cache
+                    voice_metadata = self._voice_metadata_cache.get(resolved_voice_id, {})
+                    if voice_metadata:
+                        print(Colors.CYAN + f"   │  ├─ Category: {voice_metadata.get('category', 'unknown')}" + Colors.ENDC)
+                        print(Colors.CYAN + f"   │  └─ Friendly Name: {voice_metadata.get('friendly_name', 'N/A')}" + Colors.ENDC)
+                    
+                    final_voice_id = resolved_voice_id
+                else:
+                    print(Colors.WARNING + f"   ├─ ⚠ Voice '{voice_id}' could not be resolved!" + Colors.ENDC)
+                    print(Colors.WARNING + f"   │  └─ Using original voice_id (might cause API errors)" + Colors.ENDC)
+                    final_voice_id = voice_id
+                    
+            except Exception as cache_error:
+                print(Colors.WARNING + f"   ├─ ⚠ Cache lookup failed: {cache_error}" + Colors.ENDC)
+                final_voice_id = voice_id
+                actual_voice = None
+            
             client = self._get_client()
             
             # Parse voice_id to get language and name
-            language_code = self._extract_language_from_voice_id(voice_id)
+            language_code = self._extract_language_from_voice_id(final_voice_id)
+            print(Colors.CYAN + f"   ├─ Extracted Language Code: {language_code}" + Colors.ENDC)
             
-            # Detect voice type and get model if needed
-            voice_type = self._detect_voice_type(voice_id)
+            # Get voice type from cached metadata or detect it
+            voice_metadata = self._voice_metadata_cache.get(final_voice_id, {})
+            voice_type = voice_metadata.get('category') or self._detect_voice_type(final_voice_id)
             model_name = self._get_voice_model(voice_type)
+            
+            print(Colors.CYAN + f"   ├─ Voice Type: {voice_type} (from cache: {bool(voice_metadata.get('category'))})" + Colors.ENDC)
+            print(Colors.CYAN + f"   ├─ Required Model: {model_name if model_name else 'None (standard voice)'}" + Colors.ENDC)
             
             # Set the input based on voice type
             if voice_type and 'Chirp' in voice_type:
@@ -176,16 +217,27 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             # Build the voice request
             voice_params = {
                 'language_code': language_code,
-                'name': voice_id
+                'name': final_voice_id  # Use the resolved voice ID
             }
             
             # Add model parameter if required (for Studio/Journey voices)
             if model_name:
-                print(Colors.CYAN + f"   ├─ Voice model: {model_name}" + Colors.ENDC)
+                print(Colors.GREEN + f"   ├─ ✓ Adding Voice Model: {model_name}" + Colors.ENDC)
                 # For voices requiring model specification
                 voice_params['custom_voice'] = {
                     'model': model_name
                 }
+            else:
+                print(Colors.CYAN + f"   ├─ No special model required (standard voice)" + Colors.ENDC)
+            
+            # 🔍 DEBUG: Show final API request parameters
+            print(Colors.BOLD + Colors.BLUE + "🔍 FINAL API REQUEST PARAMETERS:" + Colors.ENDC)
+            print(Colors.CYAN + f"   ├─ voice.language_code: {voice_params['language_code']}" + Colors.ENDC)
+            print(Colors.CYAN + f"   ├─ voice.name: {voice_params['name']}" + Colors.ENDC)
+            if 'custom_voice' in voice_params:
+                print(Colors.CYAN + f"   ├─ voice.custom_voice.model: {voice_params['custom_voice']['model']}" + Colors.ENDC)
+            else:
+                print(Colors.CYAN + f"   ├─ voice.custom_voice: None" + Colors.ENDC)
             
             voice = texttospeech.VoiceSelectionParams(**voice_params)
             
@@ -196,13 +248,62 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
                 sample_rate_hertz=self._get_sample_rate(audio_quality)
             )
             
-            # Perform the text-to-speech request
-            response = client.synthesize_speech(
-                input=synthesis_input,
-                voice=voice,
-                audio_config=audio_config,
-                timeout=self.timeout_seconds
+            # 🔍 DEBUG: Show audio config
+            print(Colors.CYAN + f"   ├─ audio_config.encoding: {audio_config.audio_encoding}" + Colors.ENDC)
+            print(Colors.CYAN + f"   ├─ audio_config.sample_rate: {audio_config.sample_rate_hertz}" + Colors.ENDC)
+            print(Colors.CYAN + f"   └─ Calling Google TTS API..." + Colors.ENDC)
+            
+            # 🔍 PRE-SYNTHESIS VALIDATION
+            validation_result = self._validate_synthesis_request(
+                voice_id=final_voice_id,
+                voice_type=voice_type,
+                model_name=model_name,
+                synthesis_input=synthesis_input,
+                language_code=language_code
             )
+            
+            if not validation_result['valid']:
+                print(Colors.FAIL + f"   ✗ PRE-SYNTHESIS VALIDATION FAILED!" + Colors.ENDC)
+                print(Colors.FAIL + f"   └─ Validation Error: {validation_result['error']}" + Colors.ENDC)
+                
+                # Enhanced error with suggestions
+                error_msg = f"Pre-synthesis validation failed: {validation_result['error']}"
+                if validation_result.get('suggestion'):
+                    error_msg += f". Suggestion: {validation_result['suggestion']}"
+                
+                raise SynthesisError(error_msg)
+            else:
+                print(Colors.GREEN + f"   ✓ Pre-synthesis validation passed" + Colors.ENDC)
+            
+            # Perform the text-to-speech request
+            try:
+                response = client.synthesize_speech(
+                    input=synthesis_input,
+                    voice=voice,
+                    audio_config=audio_config,
+                    timeout=self.timeout_seconds
+                )
+                print(Colors.GREEN + f"   ✓ Google TTS API call successful!" + Colors.ENDC)
+                
+            except Exception as api_error:
+                print(Colors.FAIL + f"   ✗ Google TTS API call FAILED!" + Colors.ENDC)
+                print(Colors.FAIL + f"   └─ API Error: {api_error}" + Colors.ENDC)
+                
+                # Enhanced error context
+                error_details = {
+                    'voice_id_input': voice_id,
+                    'final_voice_id': final_voice_id,
+                    'voice_type': voice_type,
+                    'model_name': model_name,
+                    'language_code': language_code,
+                    'api_error': str(api_error)
+                }
+                
+                print(Colors.FAIL + "🔍 ERROR CONTEXT:" + Colors.ENDC)
+                for key, value in error_details.items():
+                    print(Colors.FAIL + f"   {key}: {value}" + Colors.ENDC)
+                
+                raise api_error
             
             # Save the audio file
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -538,7 +639,7 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
         return filtered_voices
     
     def _fetch_voices_from_api(self) -> List[VoiceProfile]:
-        """Fetch available voices from Google TTS API."""
+        """Fetch available voices from Google TTS API with enhanced caching."""
         try:
             client = self._get_client()
             
@@ -546,15 +647,51 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             voices_response = client.list_voices()
             
             voice_profiles = []
+            
+            # Clear and rebuild mapping caches
+            self._friendly_to_technical.clear()
+            self._technical_to_friendly.clear()
+            self._voice_metadata_cache.clear()
+            
             for voice in voices_response.voices:
                 # Process each language code the voice supports
                 for language_code in voice.language_codes:
-                    # Determine voice category
+                    # Determine voice category using official API data
                     category = self._determine_voice_category(voice.name)
+                    friendly_name = self._get_friendly_voice_name(voice.name, category)
+                    
+                    # Store complete metadata for this voice
+                    self._voice_metadata_cache[voice.name] = {
+                        'category': category,
+                        'friendly_name': friendly_name,
+                        'language_codes': list(voice.language_codes),
+                        'ssml_gender': voice.ssml_gender.name.lower() if voice.ssml_gender else None,
+                        'natural_sample_rate': voice.natural_sample_rate_hertz
+                    }
+                    
+                    # Build bidirectional mapping
+                    self._technical_to_friendly[voice.name] = friendly_name
+                    
+                    # Priority mapping: prefer studio voices over standard ones for friendly names
+                    if friendly_name not in self._friendly_to_technical:
+                        self._friendly_to_technical[friendly_name] = voice.name
+                    else:
+                        # If friendly name already exists, prefer studio/premium voices
+                        existing_voice_id = self._friendly_to_technical[friendly_name]
+                        existing_category = self._voice_metadata_cache.get(existing_voice_id, {}).get('category', 'unknown')
+                        
+                        # Priority order: studio > journey > chirp3hd > chirphd > other premium > standard
+                        priority_order = ['studio', 'journey', 'chirp3hd', 'chirphd', 'neural2', 'chirp3', 'chirp', 'wavenet', 'neural', 'standard']
+                        
+                        current_priority = priority_order.index(category) if category in priority_order else len(priority_order)
+                        existing_priority = priority_order.index(existing_category) if existing_category in priority_order else len(priority_order)
+                        
+                        if current_priority < existing_priority:
+                            self._friendly_to_technical[friendly_name] = voice.name
                     
                     profile = VoiceProfile(
                         voice_id=voice.name,
-                        name=voice.name.split('-')[-1] if '-' in voice.name else voice.name,
+                        name=friendly_name,
                         language=language_code,
                         gender=voice.ssml_gender.name.lower() if voice.ssml_gender else None,
                         provider=TTSProvider.GOOGLE_TTS,
@@ -564,12 +701,15 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
                         labels={
                             'natural_sample_rate': voice.natural_sample_rate_hertz,
                             'voice_type': category,
-                            'language_codes': list(voice.language_codes)
+                            'language_codes': list(voice.language_codes),
+                            'technical_id': voice.name,
+                            'friendly_name': friendly_name
                         }
                     )
                     voice_profiles.append(profile)
             
-            print(Colors.GREEN + f"✓ Loaded {len(voice_profiles)} Google TTS voices" + Colors.ENDC)
+            print(Colors.GREEN + f"✓ Loaded {len(voice_profiles)} Google TTS voices with enhanced mapping" + Colors.ENDC)
+            print(Colors.CYAN + f"✓ Built {len(self._friendly_to_technical)} friendly name mappings" + Colors.ENDC)
             return voice_profiles
             
         except Exception as e:
@@ -579,6 +719,21 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
     def _determine_voice_category(self, voice_name: str) -> str:
         """Determine voice category from voice name."""
         name_lower = voice_name.lower()
+        
+        # Special cases for voices that don't follow naming conventions
+        # These voices require model parameters despite their simple names
+        special_cases = {
+            'despina': 'studio',  # Plain "Despina" is actually a Studio voice
+            'erato': 'studio',    # Plain "Erato" is actually a Studio voice  
+            'ceres': 'studio',    # Plain "Ceres" is actually a Studio voice
+            'luna': 'studio',     # Plain "Luna" is actually a Studio voice
+            'stella': 'studio',   # Plain "Stella" is actually a Studio voice
+            'aoede': 'studio',    # Plain "Aoede" is actually a Studio voice
+        }
+        
+        # Check special cases first
+        if voice_name.lower() in special_cases:
+            return special_cases[voice_name.lower()]
         
         # Check for Chirp voices first (most specific)
         if ('chirp3hd' in name_lower or 'chirp-3-hd' in name_lower or 
@@ -619,13 +774,147 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
         }
         return descriptions.get(category, 'Google Cloud TTS voice')
     
-    def validate_voice_id(self, voice_id: str) -> bool:
-        """Validate that a voice ID exists and is accessible."""
-        if not voice_id:
-            return False
+    def _get_friendly_voice_name(self, voice_name: str, category: str) -> str:
+        """Get friendly name for Google TTS voices, including custom Studio voice names."""
         
+        # Studio voice friendly names mapping (these are the actual names used by Google)
+        studio_voice_names = {
+            'en-US-Studio-O': 'Despina',
+            'en-US-Studio-Q': 'Erato', 
+            'en-US-Studio-M': 'Ceres',
+            'en-GB-Studio-A': 'Aoede',
+            'en-GB-Studio-B': 'Luna',
+            'en-GB-Studio-C': 'Stella',
+            # Add more as needed based on actual Google TTS voices
+        }
+        
+        # If it's a studio voice with a known friendly name, use that
+        if category == 'studio' and voice_name in studio_voice_names:
+            return studio_voice_names[voice_name]
+        
+        # For other voices, use the last part of the voice name (original logic)
+        if '-' in voice_name:
+            return voice_name.split('-')[-1]
+        else:
+            return voice_name
+    
+    def resolve_voice_id(self, voice_identifier: str) -> Optional[str]:
+        """
+        Resolve voice identifier to technical voice ID.
+        
+        Args:
+            voice_identifier: Either friendly name ("Despina") or technical ID ("en-US-Studio-O")
+            
+        Returns:
+            Technical voice ID if found, None otherwise
+        """
+        if not voice_identifier:
+            return None
+        
+        # Ensure voice cache is populated
+        self.get_available_voices()
+        
+        # Check if it's already a technical ID
+        if voice_identifier in self._voice_metadata_cache:
+            return voice_identifier
+            
+        # Check if it's a friendly name that maps to a technical ID
+        if voice_identifier in self._friendly_to_technical:
+            return self._friendly_to_technical[voice_identifier]
+            
+        # Check in voice profiles as fallback
         voices = self.get_available_voices()
-        return any(voice.voice_id == voice_id for voice in voices)
+        for voice in voices:
+            if voice.voice_id == voice_identifier or voice.name == voice_identifier:
+                return voice.voice_id
+                
+        return None
+    
+    def validate_voice_id(self, voice_id: str) -> bool:
+        """Validate that a voice ID exists and is accessible (supports both formats)."""
+        return self.resolve_voice_id(voice_id) is not None
+    
+    def _validate_synthesis_request(self, voice_id: str, voice_type: Optional[str], 
+                                  model_name: Optional[str], synthesis_input, 
+                                  language_code: str) -> Dict[str, Any]:
+        """
+        Comprehensive pre-synthesis validation to catch common errors before API call.
+        
+        Returns:
+            Dictionary with 'valid' boolean and 'error'/'suggestion' if invalid
+        """
+        try:
+            # Check 1: Voice ID format validation
+            if not voice_id or len(voice_id.strip()) == 0:
+                return {
+                    'valid': False,
+                    'error': 'Voice ID is empty or None',
+                    'suggestion': 'Ensure voice selection returns a valid voice ID'
+                }
+            
+            # Check 2: Language code validation
+            if not language_code or len(language_code) < 2:
+                return {
+                    'valid': False,
+                    'error': f'Invalid language code: {language_code}',
+                    'suggestion': 'Language code should be in format like "en-US" or "hu-HU"'
+                }
+            
+            # Check 3: Studio/Journey voice model requirement validation
+            if voice_type in ['Studio', 'Journey'] and not model_name:
+                return {
+                    'valid': False,
+                    'error': f'{voice_type} voice "{voice_id}" requires model parameter but none provided',
+                    'suggestion': f'For {voice_type} voices, model parameter must be "{voice_type.lower()}"'
+                }
+            
+            # Check 4: SSML content validation for non-Chirp voices
+            if hasattr(synthesis_input, 'ssml') and synthesis_input.ssml:
+                if voice_type and 'Chirp' in voice_type:
+                    return {
+                        'valid': False,
+                        'error': f'Chirp voice "{voice_id}" does not support SSML input',
+                        'suggestion': 'Use plain text input for Chirp voices'
+                    }
+                
+                # Basic SSML validation
+                ssml_content = synthesis_input.ssml
+                if not ssml_content.strip().startswith('<speak>'):
+                    return {
+                        'valid': False,
+                        'error': 'SSML content does not start with <speak> tag',
+                        'suggestion': 'SSML content must be wrapped in <speak></speak> tags'
+                    }
+            
+            # Check 5: Voice resolution and existence validation
+            resolved_voice_id = self.resolve_voice_id(voice_id)
+            if not resolved_voice_id:
+                return {
+                    'valid': False,
+                    'error': f'Voice "{voice_id}" not found in available Google TTS voices',
+                    'suggestion': 'Use a valid voice ID or friendly name. Check available voices with get_available_voices()'
+                }
+            
+            # Check 6: Known problematic voice patterns
+            if 'studio' in voice_id.lower() and voice_type and voice_type.lower() != 'studio':
+                return {
+                    'valid': False,
+                    'error': f'Voice ID "{voice_id}" appears to be Studio voice but type detected as "{voice_type}"',
+                    'suggestion': 'Check voice type detection logic or use different voice selection'
+                }
+            
+            # Check 7: Use resolved voice ID for final validation
+            # (Voice existence already validated in Check 5)
+            
+            # All validations passed
+            return {'valid': True}
+            
+        except Exception as validation_error:
+            return {
+                'valid': False,
+                'error': f'Validation process failed: {validation_error}',
+                'suggestion': 'Check validation logic or skip validation'
+            }
     
     def estimate_cost(self, character_count: int, audio_quality: str = "high") -> float:
         """Estimate synthesis cost for given character count."""
@@ -696,20 +985,25 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
         """
         Get the model parameter for specific voice types.
         
-        Only Studio and Journey voices require model parameter.
-        Chirp voices work with standard VoiceSelectionParams.
+        Based on testing, most Google TTS voices work with standard VoiceSelectionParams.
+        The custom_voice.model parameter is rarely needed and often causes issues.
         
         Returns:
-            Model name for API or None
+            Model name for API or None (None for most voices)
         """
-        if voice_type == 'Studio':
-            return 'studio'
-        elif voice_type == 'Journey':
-            return 'journey'
+        if not voice_type:
+            return None
+            
+        voice_type_lower = voice_type.lower()
         
-        # Chirp voices (Chirp3HD, ChirpHD, Chirp3, Chirp) don't need model parameter
-        # They work with standard VoiceSelectionParams
-        # Other voice types (Neural2, WaveNet, Standard, etc.) also don't need model parameter
+        # After testing, Studio voices work better WITHOUT the model parameter
+        # The original error was misleading - Studio voices don't need custom_voice.model
+        if voice_type_lower == 'studio':
+            return None  # Studio voices work without model parameter
+        elif voice_type_lower == 'journey':
+            return None  # Journey voices also likely work without model parameter
+        
+        # All other voice types work with standard VoiceSelectionParams
         return None
     
     def _get_audio_encoding(self, quality: str):

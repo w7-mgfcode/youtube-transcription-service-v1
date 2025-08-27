@@ -3,8 +3,9 @@
 import os
 import uuid
 import asyncio
+import logging
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi import FastAPI, BackgroundTasks, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl
@@ -25,6 +26,8 @@ from .core.dubbing_service import DubbingService
 from .core.tts_factory import TTSFactory
 from .core.tts_interface import TTSProvider
 
+# Logger setup
+logger = logging.getLogger(__name__)
 
 # Pydantic models for API
 class TranscribeRequest(BaseModel):
@@ -958,6 +961,182 @@ async def get_service_stats():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Stats error: {str(e)}")
+
+
+@app.get("/v1/debug/google-tts-voices")
+async def debug_google_tts_voices(
+    limit: int = Query(20, ge=1, le=100, description="Number of voices to return"),
+    language: Optional[str] = Query(None, description="Filter by language code (e.g., en-US)"),
+    category: Optional[str] = Query(None, description="Filter by voice category (studio, neural2, etc.)")
+):
+    """
+    Debug endpoint to inspect Google TTS voices with detailed information.
+    Shows voice ID mapping, categories, and model requirements.
+    """
+    try:
+        factory = TTSFactory()
+        
+        # Get Google TTS synthesizer
+        try:
+            google_synthesizer = factory.create_synthesizer(TTSProvider.GOOGLE_TTS)
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Google TTS not available: {e}")
+        
+        # Get voices with filters
+        voices = google_synthesizer.get_available_voices(language=language)
+        
+        if category:
+            voices = [v for v in voices if v.category == category.lower()]
+        
+        # Limit results
+        voices = voices[:limit]
+        
+        debug_info = []
+        for voice in voices:
+            # Get detection results for this voice
+            voice_type = google_synthesizer._detect_voice_type(voice.voice_id)
+            model_required = google_synthesizer._get_voice_model(voice_type)
+            
+            voice_debug = {
+                "voice_id": voice.voice_id,
+                "friendly_name": voice.name,
+                "language": voice.language,
+                "gender": voice.gender,
+                "category": voice.category,
+                "is_premium": voice.is_premium,
+                "description": voice.description,
+                "detection_results": {
+                    "detected_voice_type": voice_type,
+                    "model_parameter_required": model_required,
+                    "would_fail_without_model": model_required is not None
+                },
+                "labels": voice.labels
+            }
+            debug_info.append(voice_debug)
+        
+        return {
+            "total_voices_found": len(debug_info),
+            "filters_applied": {
+                "language": language,
+                "category": category,
+                "limit": limit
+            },
+            "voices": debug_info,
+            "debug_notes": {
+                "voice_id_vs_friendly_name": "voice_id is used for API calls, friendly_name is shown to users",
+                "model_parameter": "Studio and Journey voices require model parameter in API calls",
+                "would_fail_without_model": "Indicates if this voice would fail with '400 model name required' error"
+            },
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Debug endpoint error: {e}")
+        raise HTTPException(status_code=500, detail=f"Debug endpoint failed: {e}")
+
+
+@app.get("/v1/debug/voice-lookup/{voice_identifier}")
+async def debug_voice_lookup(voice_identifier: str):
+    """
+    Debug endpoint to look up a specific voice by ID or friendly name.
+    Useful for troubleshooting voice selection issues.
+    """
+    try:
+        factory = TTSFactory()
+        
+        # Get Google TTS synthesizer
+        try:
+            google_synthesizer = factory.create_synthesizer(TTSProvider.GOOGLE_TTS)
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Google TTS not available: {e}")
+        
+        # Get all voices
+        all_voices = google_synthesizer.get_available_voices()
+        
+        # Find matches by voice_id or friendly name
+        exact_id_matches = [v for v in all_voices if v.voice_id == voice_identifier]
+        exact_name_matches = [v for v in all_voices if v.name == voice_identifier]
+        partial_matches = [v for v in all_voices if 
+                          voice_identifier.lower() in v.voice_id.lower() or 
+                          voice_identifier.lower() in v.name.lower()]
+        
+        results = {
+            "search_term": voice_identifier,
+            "exact_voice_id_matches": len(exact_id_matches),
+            "exact_friendly_name_matches": len(exact_name_matches),
+            "partial_matches": len(partial_matches),
+            "matches": {
+                "by_voice_id": [
+                    {
+                        "voice_id": v.voice_id,
+                        "friendly_name": v.name,
+                        "language": v.language,
+                        "category": v.category,
+                        "detection_results": {
+                            "voice_type": google_synthesizer._detect_voice_type(v.voice_id),
+                            "model_required": google_synthesizer._get_voice_model(
+                                google_synthesizer._detect_voice_type(v.voice_id)
+                            )
+                        }
+                    } for v in exact_id_matches
+                ],
+                "by_friendly_name": [
+                    {
+                        "voice_id": v.voice_id,
+                        "friendly_name": v.name,
+                        "language": v.language,
+                        "category": v.category,
+                        "detection_results": {
+                            "voice_type": google_synthesizer._detect_voice_type(v.voice_id),
+                            "model_required": google_synthesizer._get_voice_model(
+                                google_synthesizer._detect_voice_type(v.voice_id)
+                            )
+                        }
+                    } for v in exact_name_matches
+                ],
+                "partial_matches": [
+                    {
+                        "voice_id": v.voice_id,
+                        "friendly_name": v.name,
+                        "language": v.language,
+                        "category": v.category,
+                        "match_reason": (
+                            "voice_id contains term" if voice_identifier.lower() in v.voice_id.lower()
+                            else "friendly_name contains term"
+                        )
+                    } for v in partial_matches[:10]  # Limit partial matches
+                ]
+            },
+            "recommendations": _get_voice_lookup_recommendations(
+                voice_identifier, exact_id_matches, exact_name_matches, partial_matches
+            ),
+            "timestamp": datetime.datetime.now().isoformat()
+        }
+        
+        return results
+        
+    except Exception as e:
+        logger.error(f"Voice lookup debug error: {e}")
+        raise HTTPException(status_code=500, detail=f"Voice lookup failed: {e}")
+
+
+def _get_voice_lookup_recommendations(search_term: str, exact_id: list, exact_name: list, partial: list) -> list:
+    """Generate recommendations for voice lookup results."""
+    recommendations = []
+    
+    if exact_id:
+        recommendations.append("✓ Found exact voice ID match - use this voice_id for API calls")
+    elif exact_name:
+        recommendations.append("✓ Found exact friendly name match - use the voice_id from results for API calls")
+    elif partial:
+        recommendations.append("⚠ Only partial matches found - check if search term is correct")
+    else:
+        recommendations.append("❌ No matches found - voice might not exist or be available")
+    
+    if search_term == "Despina":
+        recommendations.append("💡 For 'Despina': This should be 'en-US-Studio-O' voice ID")
+        
+    return recommendations
 
 
 if __name__ == "__main__":
