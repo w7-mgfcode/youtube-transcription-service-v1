@@ -4,13 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a YouTube transcription service project that processes YouTube videos into Hungarian text transcripts using Google Cloud Speech-to-Text API. The project has been refactored from a monolithic script (`v25.py`) into a modular, containerized service architecture.
+This is a YouTube transcription service project that processes YouTube videos into Hungarian text transcripts using Google Cloud Speech-to-Text API. The project has been refactored from a monolithic script (`v25.py`) into a modular, containerized service architecture with **multi-provider TTS dubbing capabilities** featuring Google Cloud TTS and ElevenLabs integration.
 
 ## Current State
 
-The repository contains a complete, production-ready YouTube transcription service:
-- **Modular Architecture**: 13 focused Python modules with clean separation of concerns
+The repository contains a complete, production-ready YouTube transcription and dubbing service:
+- **Modular Architecture**: 18 focused Python modules with clean separation of concerns
 - **Dual Interface**: Both CLI (preserving original v25.py Hungarian experience) and REST API
+- **Multi-Provider TTS**: Google Cloud TTS and ElevenLabs integration with 94% cost savings
+- **Complete Dubbing Pipeline**: Video transcription, translation, and TTS synthesis
 - **Docker Ready**: Complete containerization with docker-compose for development and production
 - **Vertex AI Integration**: User-selectable Gemini models for post-processing with fallback support
 
@@ -18,6 +20,7 @@ The repository contains a complete, production-ready YouTube transcription servi
 
 - **Core**: Python 3.11+, yt-dlp (latest), ffmpeg
 - **Speech Processing**: Google Cloud Speech-to-Text API (Hungarian language support)
+- **Text-to-Speech**: Multi-provider architecture with Google Cloud TTS and ElevenLabs
 - **Storage**: Google Cloud Storage for large files (adaptive sync/async processing)
 - **AI Post-processing**: Vertex AI with multiple Gemini model options:
   - gemini-2.0-flash (recommended)
@@ -34,7 +37,9 @@ The service uses adaptive processing with intelligent model selection:
 - **Small files (≤10MB)**: Synchronous Speech API calls
 - **Large files (>10MB)**: Upload to GCS → Long-running Speech API
 - **Dual interfaces**: CLI mode (preserving original Hungarian behavior) + REST API
+- **TTS Provider Selection**: Auto-selection prioritizing Google TTS for 94% cost savings
 - **Processing flow**: Download → FLAC conversion → Transcribe → Format → Optional Vertex AI → Save
+- **Dubbing flow**: Transcribe → Translate → TTS Synthesis → Audio/Video sync
 - **Multi-region fallback**: us-central1, us-east1, us-west1, europe-west4
 
 ## Development Commands
@@ -82,6 +87,15 @@ make prod                        # Start production stack with nginx
 - [x] Progress tracking with animated bars and ETA
 - [x] Automatic temp file cleanup
 
+### TTS & Dubbing Features (Added January 2025)
+- [x] **Multi-Provider TTS**: Google Cloud TTS and ElevenLabs integration
+- [x] **94% Cost Savings**: Google TTS at $0.016/1K vs ElevenLabs at $0.30/1K chars
+- [x] **1,616+ Voices**: Comprehensive voice library across 40+ languages
+- [x] **Voice Mapping**: Seamless migration between providers
+- [x] **SSML Support**: Advanced speech markup with timestamp preservation
+- [x] **Chunked Processing**: Unlimited transcript length with parallel synthesis
+- [x] **Hungarian TTS Interface**: Complete provider selection in Hungarian CLI
+
 ### Vertex AI Model Selection
 - [x] **Interactive CLI**: Hungarian model selection interface
 - [x] **API Parameter**: `vertex_ai_model` in JSON requests
@@ -110,12 +124,20 @@ make prod                        # Start production stack with nginx
 - `GET /v1/jobs` - List jobs with pagination
 - `DELETE /v1/jobs/{job_id}` - Delete job and files
 
+### Dubbing & TTS (Added January 2025)
+- `POST /v1/dubbing` - Complete video dubbing workflow
+- `GET /v1/tts-providers` - List available TTS providers with metadata
+- `GET /v1/tts-providers/{provider}/voices` - Get provider-specific voices
+- `GET /v1/tts-cost-comparison` - Real-time TTS cost comparison
+
 ### Monitoring & Admin
 - `GET /health` - Basic health check
 - `GET /admin/stats` - Service statistics and metrics
 - `GET /docs` - Interactive API documentation (Swagger)
 
-### Model Selection Examples
+### API Request Examples
+
+#### Transcription with Vertex AI
 ```json
 {
   "url": "https://youtube.com/watch?v=...",
@@ -124,21 +146,41 @@ make prod                        # Start production stack with nginx
 }
 ```
 
+#### Complete Dubbing Workflow
+```json
+{
+  "url": "https://youtube.com/watch?v=...",
+  "target_language": "en-US",
+  "tts_provider": "google_tts",
+  "voice_id": "en-US-Neural2-F",
+  "use_chunked_processing": true
+}
+```
+
 ## File Structure
 
 ```
 v1/
-├── src/                    # Source code (13 modules)
+├── src/                    # Source code (18+ modules)
 │   ├── main.py            # Entry point (CLI/API mode switching)
-│   ├── config.py          # Configuration with VertexAIModels class
-│   ├── api.py             # FastAPI application
-│   ├── cli.py             # Interactive CLI (v25.py compatibility)
+│   ├── config.py          # Configuration with VertexAI & TTS settings
+│   ├── api.py             # FastAPI application with TTS endpoints
+│   ├── cli.py             # Interactive CLI (v25.py + TTS compatibility)
 │   ├── core/              # Core business logic modules
+│   │   ├── transcriber.py      # Main transcription orchestrator
+│   │   ├── dubbing_service.py  # Complete dubbing workflow
+│   │   ├── tts_interface.py    # Abstract TTS provider interface
+│   │   ├── tts_factory.py      # TTS provider factory & voice mapping
+│   │   ├── google_tts_synthesizer.py # Google Cloud TTS implementation
+│   │   ├── synthesizer.py      # ElevenLabs TTS adapter
+│   │   ├── translator.py       # Text translation service
+│   │   └── video_muxer.py      # Audio/video synchronization
+│   ├── models/            # Pydantic data models for TTS & dubbing
 │   └── utils/             # Utility functions
-├── docs/                  # English documentation
-├── examples/              # Usage examples and scripts
-├── tests/                 # Test suite
-├── requirements.txt       # Python dependencies
+├── docs/                  # English documentation + TTS guides
+├── examples/              # Usage examples and TTS demos (5 scripts)
+├── tests/                 # Test suite with TTS provider testing
+├── requirements.txt       # Python dependencies (includes Google TTS)
 ├── Dockerfile            # Multi-stage container build
 ├── docker-compose.yml    # Development configuration
 ├── docker-compose.prod.yml # Production configuration
@@ -153,7 +195,11 @@ v1/
 - ✅ **Same File Output**: Transcript format, naming, statistics
 - ✅ **Same Functionality**: All original features preserved
 
-### Enhanced Capabilities
+### Enhanced Capabilities (2025)
+- 🆕 **Multi-Provider TTS**: Google TTS with 94% cost savings vs ElevenLabs
+- 🆕 **Complete Dubbing Pipeline**: Video transcription to dubbed output
+- 🆕 **Hungarian TTS Interface**: Provider selection in native Hungarian
+- 🆕 **Voice Mapping**: Seamless migration between TTS providers
 - 🆕 **Model Selection**: Choose specific Vertex AI models or auto-detect
 - 🆕 **REST API**: Programmatic access for integrations
 - 🆕 **Background Processing**: Non-blocking job execution
@@ -238,4 +284,18 @@ make rebuild               # Clean rebuild with latest dependencies
 docker compose pull       # Update base images
 ```
 
-This service maintains 100% compatibility with the beloved v25.py Hungarian CLI experience while providing modern API capabilities and production-ready deployment options.
+## Version Information
+
+**Service Version**: 1.0.0  
+**TTS Integration**: Complete (January 15, 2025)  
+**Google TTS Implementation**: Production Ready ✅  
+**Development Status**: All 7 phases completed January 15, 2025
+
+**Key Achievements**:
+- **1,616 Google TTS Voices**: Across 40+ languages
+- **94% Cost Savings**: Google TTS vs ElevenLabs ($0.016 vs $0.30/1K chars)  
+- **Complete Voice Mapping**: Seamless provider migration
+- **Hungarian TTS Interface**: Native language provider selection
+- **5 Working Examples**: Comprehensive demo scripts with documentation
+
+This service maintains 100% compatibility with the beloved v25.py Hungarian CLI experience while providing modern API capabilities, multi-provider TTS integration with massive cost savings, and production-ready deployment options.

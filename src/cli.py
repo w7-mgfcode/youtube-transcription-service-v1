@@ -4,10 +4,20 @@ import sys
 from typing import Tuple
 
 from .core.transcriber import TranscriptionService
+from .core.translator import ContextAwareTranslator
+from .core.synthesizer import ElevenLabsSynthesizer
+from .core.video_muxer import VideoMuxer
+from .core.dubbing_service import DubbingService
+from .core.tts_factory import TTSFactory
 from .utils.colors import Colors, print_header
-from .utils.validators import get_user_inputs
+from .utils.validators import (
+    get_user_inputs, get_dubbing_preferences, 
+    get_voice_selection, show_dubbing_cost_estimate
+)
 from .utils.chunking import TranscriptChunker
 from .config import VertexAIModels
+from .models.dubbing import DubbingRequest, TranslationContextEnum, TTSProviderEnum
+from pydantic import HttpUrl
 
 
 class InteractiveCLI:
@@ -16,6 +26,10 @@ class InteractiveCLI:
     def __init__(self):
         self.transcriber = TranscriptionService()
         self.chunker = TranscriptChunker()
+        self.translator = ContextAwareTranslator()
+        self.synthesizer = ElevenLabsSynthesizer()
+        self.video_muxer = VideoMuxer()
+        self.dubbing_service = DubbingService()
     
     def run(self):
         """Run interactive CLI session."""
@@ -81,6 +95,24 @@ class InteractiveCLI:
                             if vertex_result["status"] == "completed":
                                 result = vertex_result
                                 print(Colors.GREEN + "✓ Vertex AI formázás alkalmazva!" + Colors.ENDC)
+                
+                # Ask about dubbing
+                dubbing_preferences = get_dubbing_preferences()
+                
+                if dubbing_preferences:
+                    dubbing_result = self._process_dubbing_workflow(
+                        video_url=video_url,
+                        test_mode=test_mode,
+                        transcript_result=result,
+                        preferences=dubbing_preferences
+                    )
+                    
+                    if dubbing_result:
+                        # Merge dubbing results into main result
+                        result.update(dubbing_result)
+                        print(Colors.GREEN + "✅ Szinkronizálás sikeres!" + Colors.ENDC)
+                    else:
+                        print(Colors.WARNING + "⚠ Szinkronizálás részben vagy egészben sikertelen" + Colors.ENDC)
                 
                 # Show final results
                 self._show_final_results(result, breath_detection)
@@ -173,10 +205,41 @@ class InteractiveCLI:
     def _show_final_results(self, result: dict, breath_detection: bool):
         """Show final results like v25.py."""
         print(Colors.BOLD + Colors.GREEN + f"\n✅ SIKERES FELDOLGOZÁS!" + Colors.ENDC)
-        print(Colors.GREEN + f"   📁 Eredmény: {result['transcript_file']}" + Colors.ENDC)
+        print(Colors.GREEN + f"   📁 Magyar átirat: {result['transcript_file']}" + Colors.ENDC)
         print(Colors.GREEN + f"   📺 Cím: {result['title']}" + Colors.ENDC)
         print(Colors.GREEN + f"   ⏱️  Időtartam: {result['duration']}s" + Colors.ENDC)
         print(Colors.GREEN + f"   📊 Szószám: {result['word_count']}" + Colors.ENDC)
+        
+        # Show dubbing results if available
+        if result.get('dubbing_status'):
+            print(Colors.CYAN + f"\n🎬 SZINKRONIZÁLÁSI EREDMÉNYEK:" + Colors.ENDC)
+            
+            dubbing_status = result.get('dubbing_status')
+            if dubbing_status == 'completed':
+                print(Colors.GREEN + f"   ✅ Szinkronizálási státusz: Sikeres" + Colors.ENDC)
+            elif dubbing_status == 'failed':
+                print(Colors.FAIL + f"   ❌ Szinkronizálási státusz: Sikertelen" + Colors.ENDC)
+                if result.get('dubbing_error'):
+                    print(Colors.FAIL + f"      └─ Hiba: {result['dubbing_error']}" + Colors.ENDC)
+            else:
+                print(Colors.WARNING + f"   ⚠ Szinkronizálási státusz: {dubbing_status}" + Colors.ENDC)
+            
+            # Show generated files
+            if result.get('translation_file'):
+                print(Colors.GREEN + f"   🌍 Fordított átirat: {result['translation_file']}" + Colors.ENDC)
+            
+            if result.get('audio_file'):
+                print(Colors.GREEN + f"   🎤 Szintetizált hang: {result['audio_file']}" + Colors.ENDC)
+            
+            if result.get('video_file'):
+                print(Colors.GREEN + f"   🎞️  Szinkronizált videó: {result['video_file']}" + Colors.ENDC)
+            
+            # Show cost breakdown if available
+            if result.get('dubbing_cost'):
+                cost_info = result['dubbing_cost']
+                total_cost = cost_info.get('total_cost_usd', 0.0)
+                if total_cost > 0:
+                    print(Colors.YELLOW + f"   💰 Szinkronizálási költség: ${total_cost:.4f}" + Colors.ENDC)
         
         # Show breath detection statistics if enabled
         if breath_detection:
@@ -194,23 +257,23 @@ class InteractiveCLI:
                 total_pauses = short_pauses + long_pauses + script_pauses
                 
                 if total_pauses > 0:
-                    print(Colors.CYAN + f"   💨 Detektált szünetek: {total_pauses} db" + Colors.ENDC)
+                    print(Colors.CYAN + f"\n💨 DETEKTÁLT SZÜNETEK: {total_pauses} db" + Colors.ENDC)
                     if short_pauses > 0:
-                        print(Colors.CYAN + f"      ├─ Rövid (•): {short_pauses}" + Colors.ENDC)
+                        print(Colors.CYAN + f"   ├─ Rövid (•): {short_pauses}" + Colors.ENDC)
                     if long_pauses > 0:
-                        print(Colors.CYAN + f"      ├─ Hosszú (••): {long_pauses}" + Colors.ENDC)
+                        print(Colors.CYAN + f"   ├─ Hosszú (••): {long_pauses}" + Colors.ENDC)
                     if script_pauses > 0:
-                        print(Colors.CYAN + f"      └─ Script jelölések: {script_pauses}" + Colors.ENDC)
+                        print(Colors.CYAN + f"   └─ Script jelölések: {script_pauses}" + Colors.ENDC)
                         
             except Exception:
                 pass
         
         # Show additional stats
         if result.get("vertex_ai_used"):
-            print(Colors.BLUE + "   🤖 Vertex AI utófeldolgozás alkalmazva" + Colors.ENDC)
+            print(Colors.BLUE + "\n🤖 Vertex AI utófeldolgozás alkalmazva" + Colors.ENDC)
         
         if result.get("test_mode"):
-            print(Colors.WARNING + "   ⚡ Teszt mód használva (60s)" + Colors.ENDC)
+            print(Colors.WARNING + "\n⚡ Teszt mód használva (60s)" + Colors.ENDC)
     
     def _show_chunking_info(self, transcript_file: str):
         """Show chunking information and cost estimates before processing."""
@@ -246,11 +309,142 @@ class InteractiveCLI:
             print(Colors.WARNING + f"⚠ Chunking információ lekérése sikertelen: {e}" + Colors.ENDC)
             return True
     
+    def _process_dubbing_workflow(self, video_url: str, test_mode: bool, 
+                                transcript_result: dict, preferences: dict) -> dict:
+        """
+        Process the complete dubbing workflow.
+        
+        Args:
+            video_url: YouTube video URL
+            test_mode: Test mode flag
+            transcript_result: Result from transcription
+            preferences: User dubbing preferences
+            
+        Returns:
+            Dictionary with dubbing results
+        """
+        try:
+            # Get transcript text for cost estimation
+            transcript_file = transcript_result.get("transcript_file")
+            if not transcript_file:
+                print(Colors.FAIL + "✗ Nem található átirat fájl a szinkronizáláshoz" + Colors.ENDC)
+                return {}
+            
+            # Read transcript for cost estimation
+            with open(transcript_file, 'r', encoding='utf-8') as f:
+                transcript_text = f.read()
+            
+            # Show cost estimate and get confirmation
+            if not show_dubbing_cost_estimate(self.dubbing_service, len(transcript_text), preferences):
+                return {}
+            
+            # Get voice selection if synthesis enabled
+            voice_id = None
+            synthesizer = None
+            if preferences.get('enable_synthesis'):
+                # Get the appropriate synthesizer based on provider selection
+                tts_provider = preferences.get('tts_provider', TTSProviderEnum.AUTO)
+                
+                try:
+                    synthesizer = TTSFactory.create_synthesizer(
+                        TTSProvider(tts_provider.value) if hasattr(tts_provider, 'value') else TTSProvider.AUTO
+                    )
+                    print(Colors.CYAN + f"\n🎤 {synthesizer.provider_name.value} hang kiválasztása..." + Colors.ENDC)
+                    
+                    voice_id = get_voice_selection(synthesizer, tts_provider)
+                    
+                    if not voice_id:
+                        print(Colors.WARNING + "⚠ Hang kiválasztása sikertelen, alapértelmezett hang használva" + Colors.ENDC)
+                        
+                except Exception as e:
+                    print(Colors.WARNING + f"⚠ TTS provider inicializálás sikertelen: {e}" + Colors.ENDC)
+                    print(Colors.CYAN + "Visszaváltás az alapértelmezett ElevenLabs szolgáltatóra..." + Colors.ENDC)
+                    
+                    # Fallback to ElevenLabs
+                    synthesizer = self.synthesizer
+                    tts_provider = TTSProviderEnum.ELEVENLABS
+                    voice_id = get_voice_selection(synthesizer, tts_provider)
+            
+            # Create dubbing request
+            try:
+                context_map = {
+                    'casual': TranslationContextEnum.CASUAL,
+                    'educational': TranslationContextEnum.EDUCATIONAL,
+                    'marketing': TranslationContextEnum.MARKETING,
+                    'spiritual': TranslationContextEnum.SPIRITUAL,
+                    'legal': TranslationContextEnum.LEGAL,
+                    'news': TranslationContextEnum.NEWS,
+                    'scientific': TranslationContextEnum.SCIENTIFIC
+                }
+                
+                translation_context = context_map.get(
+                    preferences.get('translation_context', 'casual'),
+                    TranslationContextEnum.CASUAL
+                )
+                
+                dubbing_request = DubbingRequest(
+                    url=HttpUrl(video_url),
+                    test_mode=test_mode,
+                    enable_translation=True,
+                    target_language=preferences.get('target_language', 'en-US'),
+                    translation_context=translation_context,
+                    enable_synthesis=preferences.get('enable_synthesis', False),
+                    tts_provider=preferences.get('tts_provider', TTSProviderEnum.AUTO),
+                    voice_id=voice_id,
+                    enable_video_muxing=preferences.get('enable_video_muxing', False),
+                    existing_transcript=transcript_text
+                )
+                
+            except Exception as e:
+                print(Colors.FAIL + f"✗ Szinkronizálási kérés létrehozása sikertelen: {e}" + Colors.ENDC)
+                return {}
+            
+            # Define progress callback for dubbing stages
+            def dubbing_progress(status: str, progress: int):
+                stage_names = {
+                    'translating': '🌍 Fordítás',
+                    'synthesizing': '🎤 Hangszintézis',
+                    'muxing': '🎞️  Videó összekeverés',
+                    'completed': '✅ Befejezve'
+                }
+                
+                stage_name = stage_names.get(status, status)
+                if progress >= 0:
+                    print(f"   {stage_name}: {progress}%")
+            
+            print(Colors.BOLD + f"\n🎬 Szinkronizálás indítása..." + Colors.ENDC)
+            
+            # Process dubbing
+            dubbing_result = self.dubbing_service.process_dubbing_job(
+                request=dubbing_request,
+                progress_callback=dubbing_progress
+            )
+            
+            # Convert result to dict for merging
+            result_dict = {
+                'dubbing_status': dubbing_result.status,
+                'translation_file': dubbing_result.translation_file,
+                'audio_file': dubbing_result.audio_file,
+                'video_file': dubbing_result.video_file,
+                'dubbing_cost': dubbing_result.cost_breakdown
+            }
+            
+            if dubbing_result.error:
+                result_dict['dubbing_error'] = dubbing_result.error
+                print(Colors.FAIL + f"✗ Szinkronizálási hiba: {dubbing_result.error}" + Colors.ENDC)
+            
+            return result_dict
+            
+        except Exception as e:
+            print(Colors.FAIL + f"✗ Szinkronizálási folyamat hiba: {e}" + Colors.ENDC)
+            return {}
+    
     def _show_completion_message(self):
-        """Show completion message exactly like v25.py."""
-        print(Colors.CYAN + "\n" + "="*70 + Colors.ENDC)
-        print(Colors.BOLD + "   Köszönjük, hogy használtad a YouTube Transcribe-ot! 👋" + Colors.ENDC)
-        print(Colors.CYAN + "="*70 + Colors.ENDC)
+        """Show completion message with enhanced service features."""
+        print(Colors.CYAN + "\n" + "="*80 + Colors.ENDC)
+        print(Colors.BOLD + "   Köszönjük, hogy használtad a YouTube Transcribe & Dubbing szolgáltatást! 👋" + Colors.ENDC)
+        print(Colors.CYAN + "   🎯 Magyar átírás ✓ | 🌍 Multilingual fordítás ✓ | 🎤 Hangszintézis ✓ | 🎞️ Videó szinkronizálás ✓" + Colors.ENDC)
+        print(Colors.CYAN + "="*80 + Colors.ENDC)
 
 
 def run_interactive_cli():

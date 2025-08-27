@@ -4,14 +4,21 @@
 
 This guide shows how to quickly start using the refactored YouTube Transcription Service.
 
-## ⚡ NEW: Chunking for Long Transcripts
+## ⚡ NEW: Complete Multilingual Audio Dubbing
 
-This service now supports **automatic chunking** for long transcripts (>5000 characters), enabling processing of unlimited-length videos:
+This service now includes **full audio dubbing capabilities** with context-aware translation and professional voice synthesis:
 
-- **Automatic detection**: Long transcripts are automatically chunked
+### 🎬 Dubbing Features
+- **Context-aware translation**: 7 specialized contexts (legal, spiritual, marketing, scientific, educational, news, casual)
+- **Professional voice synthesis**: ElevenLabs TTS with 20+ voice options
+- **Video muxing**: Replace audio tracks while preserving video quality
+- **Cost transparency**: Real-time cost estimation and budget controls
+- **Multi-language support**: 20+ target languages with accurate timing preservation
+
+### 🔧 Chunking for Long Content
+- **Unlimited length support**: Automatic chunking for videos of any duration
 - **Intelligent splitting**: Uses sentence boundaries for clean breaks  
 - **Overlap handling**: 200-character overlap between chunks
-- **Cost estimation**: Pre-processing cost and time estimates
 - **Progress tracking**: Real-time progress for chunked processing
 
 ### Chunking Configuration
@@ -42,11 +49,18 @@ nano .env
 
 Your `.env` should look like:
 ```bash
+# Core Configuration
 MODE=api
 GCS_BUCKET_NAME=your-bucket-name-here
 VERTEX_PROJECT_ID=your-project-id
 VERTEX_AI_MODEL=gemini-2.0-flash
 LANGUAGE_CODE=hu-HU
+
+# Dubbing Configuration (Optional)
+ELEVENLABS_API_KEY=your-elevenlabs-key-here
+ELEVENLABS_DEFAULT_VOICE=pNInz6obpgDQGcFmaJgB
+DEFAULT_TARGET_LANGUAGE=en-US
+DEFAULT_TRANSLATION_CONTEXT=casual
 ```
 
 ### Step 2: Google Cloud Credentials
@@ -87,7 +101,7 @@ open http://localhost:8000/docs
 
 ## 📱 Using the API
 
-### Submit a transcription job
+### Basic transcription job
 ```bash
 curl -X POST http://localhost:8000/v1/transcribe \
   -H "Content-Type: application/json" \
@@ -98,6 +112,46 @@ curl -X POST http://localhost:8000/v1/transcribe \
     "use_vertex_ai": true,
     "vertex_ai_model": "gemini-2.0-flash"
   }'
+```
+
+### Full dubbing pipeline job
+```bash
+curl -X POST http://localhost:8000/v1/dub \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
+    "test_mode": true,
+    "enable_translation": true,
+    "target_language": "en-US",
+    "translation_context": "casual",
+    "enable_synthesis": true,
+    "voice_id": "pNInz6obpgDQGcFmaJgB",
+    "audio_quality": "high",
+    "enable_video_muxing": true,
+    "video_format": "mp4"
+  }'
+```
+
+### Translation-only job
+```bash
+curl -X POST http://localhost:8000/v1/translate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "transcript_text": "[00:00:01] Magyar szöveg példa",
+    "target_language": "en-US",
+    "translation_context": "educational",
+    "target_audience": "students"
+  }'
+```
+
+### Get available voices
+```bash
+curl -X GET http://localhost:8000/v1/voices
+```
+
+### Cost estimation
+```bash
+curl -X GET "http://localhost:8000/v1/cost-estimate?transcript_length=2000&target_language=en-US&enable_synthesis=true"
 ```
 
 Response:
@@ -346,13 +400,16 @@ Your Google Cloud service account needs:
 - ✅ Same statistics and file output
 
 ### New Capabilities
-- 🆕 REST API for programmatic access
-- 🆕 Background job processing
-- 🆕 Docker containerization
-- 🆕 Health monitoring endpoints
-- 🆕 Job management (list, delete, status)
-- 🆕 Vertex AI model selection
+- 🆕 **Complete dubbing pipeline**: Context-aware translation + voice synthesis + video muxing
+- 🆕 **REST API**: 6 new endpoints for full dubbing functionality
+- 🆕 **Multi-language support**: 20+ languages with specialized translation contexts
+- 🆕 **Professional voice synthesis**: ElevenLabs TTS integration with quality controls
+- 🆕 **Cost transparency**: Real-time cost estimation and budget management
+- 🆕 **Background job processing**: Async handling for long dubbing tasks
+- 🆕 **Docker containerization**: Easy deployment and scaling
+- 🆕 **Health monitoring**: Complete service observability
+- 🆕 **Comprehensive testing**: 200+ tests with performance benchmarking
 
-Users familiar with v25.py can start using the CLI mode immediately with zero learning curve, while developers can leverage the new API capabilities for integration and automation.
+Users familiar with v25.py can start using the CLI mode immediately with zero learning curve, while developers can leverage the powerful new dubbing capabilities for creating multilingual content at scale.
 
 **Ready to transcribe! 🎉**

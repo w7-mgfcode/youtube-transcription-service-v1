@@ -7,17 +7,53 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # Core Configuration
       - MODE=api
-      - GCS_BUCKET_NAME=angyal-audio-transcripts-2025
-      - VERTEX_PROJECT_ID=gen-lang-client-0419432952
-      - VERTEX_AI_MODEL=gemini-2.0-flash
+      - GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-angyal-audio-transcripts-2025}
+      - VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID:-gen-lang-client-0419432952}
+      - VERTEX_AI_MODEL=${VERTEX_AI_MODEL:-gemini-2.0-flash}
       - API_HOST=0.0.0.0
       - API_PORT=8000
-      - LANGUAGE_CODE=hu-HU
+      - LANGUAGE_CODE=${LANGUAGE_CODE:-hu-HU}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SYNC_SIZE_LIMIT_MB=${SYNC_SIZE_LIMIT_MB:-10}
+      
+      # Dubbing Configuration  
+      - ENABLE_TRANSLATION=${ENABLE_TRANSLATION:-true}
+      - DEFAULT_TARGET_LANGUAGE=${DEFAULT_TARGET_LANGUAGE:-en-US}
+      - DEFAULT_TRANSLATION_CONTEXT=${DEFAULT_TRANSLATION_CONTEXT:-casual}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_DEFAULT_VOICE=${ELEVENLABS_DEFAULT_VOICE:-pNInz6obpgDQGcFmaJgB}
+      - ELEVENLABS_MODEL=${ELEVENLABS_MODEL:-eleven_multilingual_v2}
+      - MAX_VIDEO_LENGTH_MINUTES=${MAX_VIDEO_LENGTH_MINUTES:-30}
+      - TARGET_AUDIO_QUALITY=${TARGET_AUDIO_QUALITY:-high}
+      - MAX_DUBBING_COST_USD=${MAX_DUBBING_COST_USD:-10.00}
+      
+      # TTS Provider Configuration
+      - TTS_DEFAULT_PROVIDER=${TTS_DEFAULT_PROVIDER:-auto}
+      - TTS_AUTO_SELECTION_COST_FIRST=${TTS_AUTO_SELECTION_COST_FIRST:-true}
+      - GOOGLE_TTS_REGION=${GOOGLE_TTS_REGION:-us-central1}
+      - GOOGLE_TTS_DEFAULT_VOICE=${GOOGLE_TTS_DEFAULT_VOICE:-hu-HU-Wavenet-A}
+      - GOOGLE_TTS_AUDIO_PROFILE=${GOOGLE_TTS_AUDIO_PROFILE:-telephony-class-application}
+      - GOOGLE_TTS_QUALITY_PREFERENCE=${GOOGLE_TTS_QUALITY_PREFERENCE:-neural2}
+      - TTS_COST_OPTIMIZATION=${TTS_COST_OPTIMIZATION:-true}
+      
+      # Text Chunking Settings
+      - CHUNKING_ENABLED=${CHUNKING_ENABLED:-true}
+      - CHUNK_SIZE=${CHUNK_SIZE:-4000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
+      - MAX_CHUNKS=${MAX_CHUNKS:-20}
+      - MAX_TRANSCRIPT_LENGTH=${MAX_TRANSCRIPT_LENGTH:-5000}
+      
+      # Processing Limits
+      - MAX_CONCURRENT_JOBS=${MAX_CONCURRENT_JOBS:-5}
+      - JOB_TIMEOUT_SECONDS=${JOB_TIMEOUT_SECONDS:-1800}
+      - CLEANUP_AFTER_HOURS=${CLEANUP_AFTER_HOURS:-24}
     volumes:
       - ./credentials/vertex-ai-key.json:/app/credentials/service-account.json:ro
       - ./data:/app/data
       - ./temp:/app/temp
+      - ./temp/videos:/app/temp/videos  # Dubbing video storage
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]

@@ -60,6 +60,41 @@ class VertexAIModels:
         ]
 
 
+# Translation context constants for dubbing
+class TranslationContext:
+    """Supported translation contexts for dubbing."""
+    
+    LEGAL = "legal"
+    SPIRITUAL = "spiritual" 
+    MARKETING = "marketing"
+    SCIENTIFIC = "scientific"
+    CASUAL = "casual"
+    EDUCATIONAL = "educational"
+    NEWS = "news"
+    
+    @classmethod
+    def get_all_contexts(cls) -> list[str]:
+        """Get list of all available contexts."""
+        return [
+            cls.LEGAL, cls.SPIRITUAL, cls.MARKETING, 
+            cls.SCIENTIFIC, cls.CASUAL, cls.EDUCATIONAL, cls.NEWS
+        ]
+    
+    @classmethod
+    def get_context_description(cls, context: str) -> str:
+        """Get human-readable description of context."""
+        descriptions = {
+            cls.LEGAL: "Jogi/formális tartalom",
+            cls.SPIRITUAL: "Spirituális/motivációs",
+            cls.MARKETING: "Marketing/reklám",
+            cls.SCIENTIFIC: "Tudományos/technikai",
+            cls.CASUAL: "Hétköznapi beszélgetés",
+            cls.EDUCATIONAL: "Oktatási/képzés",
+            cls.NEWS: "Hírek/információs"
+        }
+        return descriptions.get(context, "Ismeretlen kontextus")
+
+
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
     
@@ -112,6 +147,59 @@ class Settings(BaseSettings):
     
     # Default bucket for backward compatibility
     default_bucket: str = "angyal-audio-transcripts-2025"
+    
+    # ==============================================================================
+    # DUBBING FEATURE SETTINGS
+    # ==============================================================================
+    
+    # Translation settings
+    enable_translation: bool = True
+    default_target_language: str = "en-US"
+    default_translation_context: str = TranslationContext.CASUAL
+    
+    # ElevenLabs TTS settings
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_default_voice: str = "pNInz6obpgDQGcFmaJgB"
+    elevenlabs_model: str = "eleven_multilingual_v2"
+    elevenlabs_base_url: str = "https://api.elevenlabs.io/v1"
+    
+    # Video processing settings
+    max_video_length_minutes: int = 30
+    temp_video_dir: str = "/app/temp/videos"
+    enable_video_preview: bool = True
+    
+    # Dubbing quality settings
+    target_audio_quality: str = "high"  # low, medium, high
+    enable_audio_optimization: bool = True
+    video_output_format: str = "mp4"
+    
+    # Cost management
+    max_dubbing_cost_usd: float = 10.00
+    enable_cost_estimation: bool = True
+    dubbing_quota_reset_hour: int = 0
+    
+    # ==============================================================================
+    # TTS PROVIDER SETTINGS  
+    # ==============================================================================
+    
+    # TTS Provider Selection
+    tts_provider: str = "auto"  # elevenlabs, google_tts, auto
+    tts_fallback_enabled: bool = True  # Enable automatic fallback between providers
+    tts_cost_optimization: bool = True  # Prefer cost-effective providers when auto
+    
+    # Google Cloud Text-to-Speech settings
+    google_tts_enabled: bool = True
+    google_tts_region: str = "us-central1"  # Google TTS API region
+    google_tts_default_voice: str = "en-US-Neural2-F"  # Default Neural2 voice (female)
+    google_tts_audio_profile: str = "large-home-entertainment-class-device"  # Audio optimization
+    google_tts_timeout_seconds: int = 300  # API timeout
+    google_tts_max_retries: int = 3  # Retry attempts
+    
+    # TTS Quality Settings
+    tts_quality_preference: str = "balanced"  # cost_optimized, balanced, premium
+    tts_synthesis_timeout: int = 300  # Synthesis timeout per request
+    tts_chunk_size_chars: int = 1000  # Character limit per synthesis chunk
+    tts_parallel_synthesis: bool = True  # Enable parallel chunk processing
     
     class Config:
         env_file = ".env"

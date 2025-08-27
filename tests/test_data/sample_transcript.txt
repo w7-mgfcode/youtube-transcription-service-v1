@@ -1,0 +1,29 @@
+[00:00:01] Üdvözöllek mindenkit a mai videóban!
+[00:00:04] Ma egy nagyon érdekes témáról fogunk beszélni.
+[00:00:08] A mesterséges intelligencia fejlődéséről és annak hatásairól.
+[00:00:12] Kezdjük is el rögtön az alapokkal.
+[00:00:15] [levegővétel]
+[00:00:16] Az MI története az 1950-es évekre nyúlik vissza.
+[00:00:20] Alan Turing volt az egyik úttörő ezen a területen.
+[00:00:24] [szünet]
+[00:00:25] Ma már mindenhol találkozunk MI alkalmazásokkal.
+[00:00:29] A telefonunktól kezdve az autókig.
+[00:00:32] De mi is pontosan az MI?
+[00:00:35] [levegővétel]
+[00:00:36] A mesterséges intelligencia olyan számítógépes rendszerek összessége.
+[00:00:40] Amelyek képesek emberi intelligenciát igénylő feladatok elvégzésére.
+[00:00:44] Ilyen például a beszédfelismerés vagy a képelemzés.
+[00:00:48] [szünet]
+[00:00:49] Az elmúlt években óriási fejlődésen ment keresztül ez a terület.
+[00:00:53] A deep learning és a neurális hálózatok forradalmasították az MI-t.
+[00:00:57] Most már olyan dolgokra is képesek a gépek, amiről korábban csak álmodtunk.
+[00:01:02] Például önvezető autók vagy valós idejű fordítás.
+[00:01:06] [levegővétel]
+[00:01:07] De milyen kihívásokkal kell szembenéznünk?
+[00:01:10] Az etikai kérdések egyre fontosabbá válnak.
+[00:01:13] Ki felel a döntésekért, amiket egy MI rendszer hoz?
+[00:01:17] Hogyan biztosítjuk, hogy az MI mindenki javát szolgálja?
+[00:01:21] [szünet]
+[00:01:22] Ezek nehéz kérdések, de foglalkoznunk kell velük.
+[00:01:26] A jövőnk múlhat azon, hogyan válaszolunk rájuk.
+[00:01:30] Köszönöm, hogy velem tartottatok!

@@ -21,7 +21,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir --upgrade yt-dlp
 
 # Create directories and fix permissions BEFORE switching user
-RUN mkdir -p /app/data /app/temp && chown -R appuser:appuser /app
+RUN mkdir -p /app/data /app/temp /app/temp/videos /app/credentials && chown -R appuser:appuser /app
 
 # Copy application code
 COPY --chown=appuser:appuser . .

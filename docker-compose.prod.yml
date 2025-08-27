@@ -7,29 +7,59 @@ services:
     ports:
       - "8000:8000"
     environment:
+      # Core Configuration
       - MODE=api
       - GCS_BUCKET_NAME=${GCS_BUCKET_NAME}
       - VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID}
       - VERTEX_AI_MODEL=${VERTEX_AI_MODEL:-gemini-2.0-flash}
       - API_HOST=0.0.0.0
       - API_PORT=8000
-      - LANGUAGE_CODE=hu-HU
-      - SYNC_SIZE_LIMIT_MB=10
-      - MAX_CONCURRENT_JOBS=10
-      - LOG_LEVEL=INFO
+      - LANGUAGE_CODE=${LANGUAGE_CODE:-hu-HU}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - SYNC_SIZE_LIMIT_MB=${SYNC_SIZE_LIMIT_MB:-10}
+      
+      # Dubbing Configuration
+      - ENABLE_TRANSLATION=${ENABLE_TRANSLATION:-true}
+      - DEFAULT_TARGET_LANGUAGE=${DEFAULT_TARGET_LANGUAGE:-en-US}
+      - DEFAULT_TRANSLATION_CONTEXT=${DEFAULT_TRANSLATION_CONTEXT:-casual}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_DEFAULT_VOICE=${ELEVENLABS_DEFAULT_VOICE:-21m00Tcm4TlvDq8ikWAM}
+      - ELEVENLABS_MODEL=${ELEVENLABS_MODEL:-eleven_multilingual_v2}
+      - MAX_VIDEO_LENGTH_MINUTES=${MAX_VIDEO_LENGTH_MINUTES:-30}
+      - TARGET_AUDIO_QUALITY=${TARGET_AUDIO_QUALITY:-high}
+      - MAX_DUBBING_COST_USD=${MAX_DUBBING_COST_USD:-50.00}
+      
+      # Text Chunking
+      - CHUNKING_ENABLED=${CHUNKING_ENABLED:-true}
+      - CHUNK_SIZE=${CHUNK_SIZE:-4000}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-200}
+      - MAX_CHUNKS=${MAX_CHUNKS:-50}
+      - MAX_TRANSCRIPT_LENGTH=${MAX_TRANSCRIPT_LENGTH:-5000}
+      
+      # Production Limits
+      - MAX_CONCURRENT_JOBS=${MAX_CONCURRENT_JOBS:-10}
+      - JOB_TIMEOUT_SECONDS=${JOB_TIMEOUT_SECONDS:-3600}
+      - CLEANUP_AFTER_HOURS=${CLEANUP_AFTER_HOURS:-6}
+      - MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-8192}
+      
+      # Security & Monitoring
+      - ENABLE_PERFORMANCE_LOGGING=${ENABLE_PERFORMANCE_LOGGING:-true}
+      - ENABLE_HEALTH_CHECKS=${ENABLE_HEALTH_CHECKS:-true}
+      - TRUSTED_PROXIES=nginx
     volumes:
       - ${SERVICE_ACCOUNT_PATH:-./credentials/service-account.json}:/app/credentials/service-account.json:ro
       - transcribe_data:/app/data
       - transcribe_temp:/app/temp
+      - transcribe_videos:/app/temp/videos
     restart: unless-stopped
     deploy:
       resources:
         limits:
+          memory: 8G
+          cpus: '4'
+        reservations:
           memory: 4G
           cpus: '2'
-        reservations:
-          memory: 2G
-          cpus: '1'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -59,6 +89,8 @@ volumes:
   transcribe_data:
     driver: local
   transcribe_temp:
+    driver: local
+  transcribe_videos:
     driver: local
 
 networks:
