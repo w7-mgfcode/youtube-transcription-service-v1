@@ -16,7 +16,7 @@ httpx==0.27.2
 rich==13.9.4
 
 # Audio/Video Processing for Dubbing
-elevenlabs==1.14.1
+elevenlabs==2.12.1
 pydub==0.25.1
 ffmpeg-python==0.2.0
 
