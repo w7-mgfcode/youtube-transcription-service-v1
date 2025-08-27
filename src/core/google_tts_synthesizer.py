@@ -653,12 +653,20 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             self._technical_to_friendly.clear()
             self._voice_metadata_cache.clear()
             
+            print(Colors.BLUE + "[DEBUG] Starting voice cache building..." + Colors.ENDC)
+            
             for voice in voices_response.voices:
                 # Process each language code the voice supports
                 for language_code in voice.language_codes:
                     # Determine voice category using official API data
                     category = self._determine_voice_category(voice.name)
                     friendly_name = self._get_friendly_voice_name(voice.name, category)
+                    
+                    # DEBUG: Show voice processing for critical voices
+                    if voice.name in ['en-US-Studio-O', 'Despina'] or 'despina' in voice.name.lower():
+                        print(Colors.YELLOW + f"[DEBUG] Processing critical voice: {voice.name}" + Colors.ENDC)
+                        print(Colors.YELLOW + f"   ├─ Category: {category}" + Colors.ENDC)
+                        print(Colors.YELLOW + f"   └─ Friendly name: {friendly_name}" + Colors.ENDC)
                     
                     # Store complete metadata for this voice
                     self._voice_metadata_cache[voice.name] = {
@@ -672,22 +680,55 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
                     # Build bidirectional mapping
                     self._technical_to_friendly[voice.name] = friendly_name
                     
-                    # Priority mapping: prefer studio voices over standard ones for friendly names
+                    # CRITICAL FIX: Ensure friendly name mapping is built correctly with proper priority
                     if friendly_name not in self._friendly_to_technical:
                         self._friendly_to_technical[friendly_name] = voice.name
+                        
+                        # DEBUG: Log critical mappings
+                        if friendly_name == 'Despina' or voice.name == 'en-US-Studio-O':
+                            print(Colors.GREEN + f"[DEBUG] Built initial mapping {friendly_name} → {voice.name}" + Colors.ENDC)
+                            
                     else:
-                        # If friendly name already exists, prefer studio/premium voices
+                        # If friendly name already exists, prefer voices with better priority
                         existing_voice_id = self._friendly_to_technical[friendly_name]
                         existing_category = self._voice_metadata_cache.get(existing_voice_id, {}).get('category', 'unknown')
                         
-                        # Priority order: studio > journey > chirp3hd > chirphd > other premium > standard
-                        priority_order = ['studio', 'journey', 'chirp3hd', 'chirphd', 'neural2', 'chirp3', 'chirp', 'wavenet', 'neural', 'standard']
+                        # Enhanced priority system:
+                        # 1. English Studio voices get TOP priority for friendly names
+                        # 2. Then other studio voices  
+                        # 3. Then other premium voices in order
+                        # 4. Then standard voices last
                         
-                        current_priority = priority_order.index(category) if category in priority_order else len(priority_order)
-                        existing_priority = priority_order.index(existing_category) if existing_category in priority_order else len(priority_order)
+                        # Check if current voice is English Studio
+                        is_current_english_studio = (category == 'studio' and voice.name.startswith('en-'))
+                        is_existing_english_studio = (existing_category == 'studio' and existing_voice_id.startswith('en-'))
                         
-                        if current_priority < existing_priority:
+                        should_replace = False
+                        
+                        if is_current_english_studio and not is_existing_english_studio:
+                            # English Studio always wins over non-English voices
+                            should_replace = True
+                            reason = "English Studio priority"
+                        elif not is_current_english_studio and is_existing_english_studio:
+                            # Existing English Studio keeps priority  
+                            should_replace = False
+                            reason = "Keeping English Studio"
+                        else:
+                            # Neither is English Studio OR both are - use category priority
+                            priority_order = ['studio', 'journey', 'chirp3hd', 'chirphd', 'neural2', 'chirp3', 'chirp', 'wavenet', 'neural', 'standard']
+                            
+                            current_priority = priority_order.index(category) if category in priority_order else len(priority_order)
+                            existing_priority = priority_order.index(existing_category) if existing_category in priority_order else len(priority_order)
+                            
+                            should_replace = current_priority < existing_priority
+                            reason = "Category priority"
+                        
+                        if should_replace:
+                            print(Colors.CYAN + f"[DEBUG] Priority override ({reason}): {friendly_name} {existing_voice_id} ({existing_category}) → {voice.name} ({category})" + Colors.ENDC)
                             self._friendly_to_technical[friendly_name] = voice.name
+                        elif friendly_name == 'Despina':
+                            # Debug why Despina wasn't replaced
+                            print(Colors.YELLOW + f"[DEBUG] Keeping existing Despina mapping: {existing_voice_id} ({existing_category}) vs {voice.name} ({category}) - {reason}" + Colors.ENDC)
                     
                     profile = VoiceProfile(
                         voice_id=voice.name,
@@ -710,6 +751,15 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             
             print(Colors.GREEN + f"✓ Loaded {len(voice_profiles)} Google TTS voices with enhanced mapping" + Colors.ENDC)
             print(Colors.CYAN + f"✓ Built {len(self._friendly_to_technical)} friendly name mappings" + Colors.ENDC)
+            
+            # DEBUG: Verify critical mappings were built correctly
+            if 'Despina' in self._friendly_to_technical:
+                mapped_id = self._friendly_to_technical['Despina']
+                print(Colors.GREEN + f"[CRITICAL] MAPPING VERIFIED: Despina → {mapped_id}" + Colors.ENDC)
+            else:
+                print(Colors.FAIL + "❌ CRITICAL MAPPING MISSING: Despina not found in friendly_to_technical" + Colors.ENDC)
+                print(Colors.YELLOW + f"[DEBUG] Available friendly names: {list(self._friendly_to_technical.keys())[:10]}..." + Colors.ENDC)
+            
             return voice_profiles
             
         except Exception as e:
@@ -809,25 +859,49 @@ class GoogleTTSSynthesizer(AbstractTTSSynthesizer):
             Technical voice ID if found, None otherwise
         """
         if not voice_identifier:
+            print(Colors.YELLOW + "[DEBUG] VOICE RESOLUTION: Empty voice identifier" + Colors.ENDC)
             return None
+        
+        print(Colors.BLUE + f"[DEBUG] VOICE RESOLUTION: Resolving '{voice_identifier}'" + Colors.ENDC)
         
         # Ensure voice cache is populated
         self.get_available_voices()
         
-        # Check if it's already a technical ID
-        if voice_identifier in self._voice_metadata_cache:
-            return voice_identifier
-            
-        # Check if it's a friendly name that maps to a technical ID
+        print(Colors.CYAN + f"   Cache populated: {len(self._voice_metadata_cache)} voices, {len(self._friendly_to_technical)} mappings" + Colors.ENDC)
+        
+        # For friendly names that exist in mapping, always prefer the mapped version
+        # This prevents issues where both "Despina" and "en-US-Studio-O" exist as technical IDs
         if voice_identifier in self._friendly_to_technical:
-            return self._friendly_to_technical[voice_identifier]
+            resolved_id = self._friendly_to_technical[voice_identifier]
+            print(Colors.GREEN + f"   Resolved friendly name: '{voice_identifier}' → '{resolved_id}'" + Colors.ENDC)
+            return resolved_id
+        
+        # Check if it's already a technical ID (fallback)
+        if voice_identifier in self._voice_metadata_cache:
+            print(Colors.GREEN + f"   Found as technical ID: {voice_identifier}" + Colors.ENDC)
+            return voice_identifier
+        
+        # Debug: Show what we have if resolution failed
+        print(Colors.WARNING + "   Not found in caches" + Colors.ENDC)
+        print(Colors.YELLOW + f"   Sample technical IDs: {list(self._voice_metadata_cache.keys())[:5]}..." + Colors.ENDC)
+        print(Colors.YELLOW + f"   Sample friendly names: {list(self._friendly_to_technical.keys())[:5]}..." + Colors.ENDC)
+        
+        # Check if Despina mapping specifically exists
+        if voice_identifier == 'Despina':
+            print(Colors.FAIL + "   CRITICAL: 'Despina' mapping missing from cache!" + Colors.ENDC)
+            if 'en-US-Studio-O' in self._voice_metadata_cache:
+                print(Colors.CYAN + "   But 'en-US-Studio-O' exists in metadata cache" + Colors.ENDC)
+                metadata = self._voice_metadata_cache['en-US-Studio-O']
+                print(Colors.CYAN + f"   Metadata: {metadata}" + Colors.ENDC)
             
         # Check in voice profiles as fallback
         voices = self.get_available_voices()
         for voice in voices:
             if voice.voice_id == voice_identifier or voice.name == voice_identifier:
+                print(Colors.CYAN + f"   Found in fallback search: {voice.voice_id}" + Colors.ENDC)
                 return voice.voice_id
-                
+        
+        print(Colors.FAIL + f"   Resolution failed for '{voice_identifier}'" + Colors.ENDC)        
         return None
     
     def validate_voice_id(self, voice_id: str) -> bool:
