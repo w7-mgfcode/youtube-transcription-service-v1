@@ -256,12 +256,12 @@ class DubbingService:
             # Convert to dict format if it's a SynthesisResult object
             if hasattr(synthesis_result, '__dict__'):
                 result_dict = {
-                    'audio_file_path': synthesis_result.output_path,
+                    'audio_file_path': synthesis_result.audio_file_path,  # Fixed: was output_path
                     'duration_seconds': synthesis_result.duration_seconds,
-                    'character_count': synthesis_result.character_count,
-                    'estimated_cost': synthesis_result.cost_usd,
-                    'provider_used': synthesis_result.provider_used.value,
-                    'voice_used': synthesis_result.voice_used
+                    'character_count': len(script_text) if script_text else 0,  # Calculate from input
+                    'estimated_cost': synthesis_result.estimated_cost,  # Fixed: was cost_usd
+                    'provider_used': getattr(synthesis_result, 'provider', TTSProvider.GOOGLE_TTS).value if hasattr(synthesis_result, 'provider') else 'google_tts',  # Fixed attribute name
+                    'voice_used': synthesis_result.voice_id  # Fixed: was voice_used
                 }
             else:
                 result_dict = synthesis_result
