@@ -149,13 +149,15 @@ class VideoMuxer:
             
             print(Colors.CYAN + f"   ├─ Downloading to: {temp_path}" + Colors.ENDC)
             
-            # Use yt-dlp to download video-only stream
+            # Use yt-dlp to download video-only stream with better format selection
+            # Priority: video-only mp4 > video-only any format > best overall with video
             cmd = [
                 'yt-dlp',
-                '--format', 'bv[ext=mp4]/best[ext=mp4]/bv/best',  # Video only, prefer mp4
+                '--format', 'bv[ext=mp4][height<=720]/bv[height<=720]/best[height<=720]/bv/best',
                 '--output', temp_path,
                 '--no-warnings',
                 '--no-playlist',
+                '--merge-output-format', 'mp4',  # Ensure output is mp4
                 video_url
             ]
             
@@ -178,12 +180,27 @@ class VideoMuxer:
             temp_dir = Path(self.temp_video_dir)
             pattern = temp_filename.replace('.%(ext)s', '.*')
             
+            downloaded_file = None
             for file_path in temp_dir.glob(pattern):
                 if file_path.is_file():
-                    print(Colors.GREEN + f"   ✓ Video downloaded: {file_path.name}" + Colors.ENDC)
-                    return str(file_path)
+                    downloaded_file = str(file_path)
+                    print(Colors.GREEN + f"   ✓ Video downloaded: {file_path.name} ({file_path.stat().st_size // 1024 // 1024}MB)" + Colors.ENDC)
+                    break
             
-            raise VideoMuxingError("Downloaded video file not found")
+            if not downloaded_file:
+                raise VideoMuxingError("Downloaded video file not found")
+            
+            # Validate the downloaded video file
+            try:
+                self._validate_video_file(downloaded_file)
+                return downloaded_file
+            except Exception as e:
+                # Clean up invalid file
+                try:
+                    os.remove(downloaded_file)
+                except:
+                    pass
+                raise VideoMuxingError(f"Downloaded video file is invalid: {e}")
             
         except subprocess.TimeoutExpired:
             raise VideoMuxingError("Video download timeout (10 minutes)")
@@ -191,6 +208,42 @@ class VideoMuxer:
             raise VideoMuxingError(f"Permission denied accessing {self.temp_video_dir}: {e}")
         except Exception as e:
             raise VideoMuxingError(f"Video download error: {e}")
+    
+    def _validate_video_file(self, video_path: str):
+        """Validate that the video file contains a proper video stream."""
+        try:
+            # Quick validation using ffprobe
+            cmd = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=codec_name,width,height,duration',
+                '-of', 'csv=p=0',
+                video_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            
+            if result.returncode != 0:
+                raise VideoMuxingError(f"ffprobe validation failed: {result.stderr}")
+            
+            # Check if we got video stream info
+            output = result.stdout.strip()
+            if not output or output.count(',') < 2:
+                raise VideoMuxingError("No valid video stream found in downloaded file")
+            
+            parts = output.split(',')
+            codec, width, height = parts[0], parts[1], parts[2]
+            
+            if not codec or not width or not height:
+                raise VideoMuxingError("Video stream missing essential properties")
+            
+            print(Colors.CYAN + f"   ✓ Video validation: {codec}, {width}x{height}" + Colors.ENDC)
+            
+        except subprocess.TimeoutExpired:
+            raise VideoMuxingError("Video validation timeout")
+        except Exception as e:
+            raise VideoMuxingError(f"Video validation failed: {e}")
     
     def _get_video_info(self, video_path: str) -> Dict:
         """Get video file information using ffprobe."""
@@ -207,20 +260,45 @@ class VideoMuxer:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
             if result.returncode != 0:
-                raise VideoMuxingError(f"ffprobe failed: {result.stderr}")
+                stderr_msg = result.stderr or "No error details available"
+                print(Colors.WARNING + f"   ⚠ ffprobe error: {stderr_msg}" + Colors.ENDC)
+                raise VideoMuxingError(f"ffprobe failed: {stderr_msg}")
             
             import json
-            probe_data = json.loads(result.stdout)
+            try:
+                probe_data = json.loads(result.stdout)
+            except json.JSONDecodeError as e:
+                print(Colors.WARNING + f"   ⚠ ffprobe output: {result.stdout[:200]}..." + Colors.ENDC)
+                raise VideoMuxingError(f"Failed to parse ffprobe JSON output: {e}")
+            
+            # Debug: Show all available streams
+            streams = probe_data.get('streams', [])
+            print(Colors.CYAN + f"   ├─ Found {len(streams)} streams in video file" + Colors.ENDC)
+            for i, stream in enumerate(streams):
+                codec_type = stream.get('codec_type', 'unknown')
+                codec_name = stream.get('codec_name', 'unknown')
+                print(Colors.CYAN + f"   │  Stream {i}: {codec_type} ({codec_name})" + Colors.ENDC)
             
             # Find video stream
             video_stream = None
-            for stream in probe_data.get('streams', []):
+            for stream in streams:
                 if stream.get('codec_type') == 'video':
                     video_stream = stream
                     break
             
             if not video_stream:
-                raise VideoMuxingError("No video stream found")
+                # Provide detailed diagnostic information
+                if not streams:
+                    raise VideoMuxingError(
+                        f"No streams found in video file. File may be corrupted or invalid. "
+                        f"File size: {os.path.getsize(video_path) // 1024 // 1024}MB"
+                    )
+                else:
+                    stream_types = [s.get('codec_type', 'unknown') for s in streams]
+                    raise VideoMuxingError(
+                        f"No video stream found. Available streams: {stream_types}. "
+                        f"This may be an audio-only file."
+                    )
             
             duration = float(probe_data.get('format', {}).get('duration', 0))
             width = video_stream.get('width', 0)
