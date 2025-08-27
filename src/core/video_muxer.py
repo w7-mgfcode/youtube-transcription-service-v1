@@ -88,12 +88,20 @@ class VideoMuxer:
             if not os.path.exists(audio_file_path):
                 raise VideoMuxingError(f"Audio file not found: {audio_file_path}")
             
-            # Get video info
+            # Get video info - check temp file integrity before processing
+            temp_size_before = os.path.getsize(temp_video_path)
+            print(Colors.CYAN + f"   ├─ Temp video size before processing: {temp_size_before // 1024 // 1024}MB" + Colors.ENDC)
+            
             video_info = self._get_video_info(temp_video_path)
             audio_info = self._get_audio_info(audio_file_path)
             
             print(Colors.CYAN + f"   ├─ Video: {video_info['duration']:.1f}s, {video_info['resolution']}" + Colors.ENDC)
             print(Colors.CYAN + f"   ├─ Audio: {audio_info['duration']:.1f}s, {audio_info['sample_rate']}Hz" + Colors.ENDC)
+            
+            # Double-check temp file still exists before muxing
+            temp_size_after_info = os.path.getsize(temp_video_path)
+            if temp_size_after_info != temp_size_before:
+                print(Colors.WARNING + f"   ⚠ Temp video size changed! Before: {temp_size_before}MB → After: {temp_size_after_info}MB" + Colors.ENDC)
             
             # Check duration compatibility
             self._validate_duration_compatibility(video_info, audio_info)
@@ -397,6 +405,17 @@ class VideoMuxer:
                 preserve_quality, target_format
             )
             
+            # Final input validation before FFmpeg
+            if not os.path.exists(video_path):
+                raise VideoMuxingError(f"Video input missing before FFmpeg: {video_path}")
+            if not os.path.exists(audio_path):
+                raise VideoMuxingError(f"Audio input missing before FFmpeg: {audio_path}")
+                
+            video_size_before_ffmpeg = os.path.getsize(video_path)
+            audio_size_before_ffmpeg = os.path.getsize(audio_path)
+            
+            print(Colors.CYAN + f"   ├─ FFmpeg inputs: Video={video_size_before_ffmpeg // 1024 // 1024}MB, Audio={audio_size_before_ffmpeg // 1024 // 1024}MB" + Colors.ENDC)
+            print(Colors.CYAN + f"   ├─ FFmpeg output: {output_path}" + Colors.ENDC)
             print(Colors.CYAN + f"   ├─ FFmpeg cmd: {' '.join(cmd[:8])}..." + Colors.ENDC)
             
             # Run FFmpeg
@@ -414,6 +433,16 @@ class VideoMuxer:
             # Verify output file was created
             if not os.path.exists(output_path):
                 raise VideoMuxingError("Output file was not created")
+            
+            # Check output file size before trying to extract info
+            output_size = os.path.getsize(output_path)
+            if output_size == 0:
+                print(Colors.FAIL + f"   ✗ FFmpeg created empty output file" + Colors.ENDC)
+                print(Colors.FAIL + f"   ✗ FFmpeg stdout: {result.stdout}" + Colors.ENDC)
+                print(Colors.FAIL + f"   ✗ FFmpeg stderr: {result.stderr}" + Colors.ENDC)
+                raise VideoMuxingError("FFmpeg created empty output file")
+            
+            print(Colors.CYAN + f"   ✓ Output file created: {output_size // 1024 // 1024}MB" + Colors.ENDC)
             
             # Get output file info
             output_info = self._get_video_info(output_path)
