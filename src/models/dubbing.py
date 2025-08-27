@@ -67,7 +67,7 @@ class TranslationRequest(BaseModel):
     preserve_timing: bool = Field(True, description="Whether to preserve timestamp accuracy")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "transcript_text": "[0:00:01] Sziasztok, üdvözöllek benneteket!\n[0:00:03] Ma egy izgalmas témáról beszélek...",
                 "target_language": "en-US",
@@ -89,7 +89,7 @@ class SynthesisRequest(BaseModel):
     output_format: str = Field("mp3_44100_128", description="Audio output format")
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "script_text": "[0:00:01] Hello, welcome everyone!\n[0:00:03] Today I'm talking about an exciting topic...",
                 "voice_id": "pNInz6obpgDQGcFmaJgB",
@@ -133,6 +133,9 @@ class DubbingRequest(BaseModel):
     # Cost and processing controls
     max_cost_usd: Optional[float] = Field(None, description="Maximum allowed cost")
     preview_mode: bool = Field(False, description="Generate audio-only preview")
+    
+    # Optional existing transcript (for CLI mode)
+    existing_transcript: Optional[str] = Field(None, description="Pre-existing transcript text")
 
     @validator('enable_synthesis')
     def synthesis_requires_voice(cls, v, values):
@@ -149,7 +152,7 @@ class DubbingRequest(BaseModel):
         return v
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
                 "test_mode": True,

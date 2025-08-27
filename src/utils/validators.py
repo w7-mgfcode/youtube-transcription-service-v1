@@ -554,13 +554,22 @@ def show_dubbing_cost_estimate(dubbing_service, transcript_length: int, preferen
     try:
         print(Colors.CYAN + "\n💰 Költségbecslés számítása..." + Colors.ENDC)
         
-        estimate = dubbing_service.estimate_dubbing_cost(
-            transcript_length=transcript_length,
+        # Create a minimal DubbingRequest for cost estimation
+        from ..models.dubbing import DubbingRequest, TTSProviderEnum, TranslationContextEnum
+        from pydantic import HttpUrl
+        
+        dummy_request = DubbingRequest(
+            url=HttpUrl("https://youtube.com/watch?v=dummy"),
+            enable_translation=True,
             target_language=preferences.get('target_language', 'en-US'),
             enable_synthesis=preferences.get('enable_synthesis', False),
             enable_video_muxing=preferences.get('enable_video_muxing', False),
-            audio_quality="high"
+            tts_provider=preferences.get('tts_provider', TTSProviderEnum.AUTO),
+            translation_context=TranslationContextEnum.CASUAL,
+            existing_transcript="x" * transcript_length  # Mock transcript for length
         )
+        
+        estimate = dubbing_service.estimate_dubbing_cost(dummy_request)
         
         print(Colors.YELLOW + "\n" + "="*50 + Colors.ENDC)
         print(Colors.YELLOW + "              💰 KÖLTSÉGBECSLÉS" + Colors.ENDC)

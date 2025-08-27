@@ -11,7 +11,7 @@ from .translator import ContextAwareTranslator, TranslationQuality
 from .synthesizer import ElevenLabsSynthesizer, SynthesisError
 from .video_muxer import VideoMuxer, VideoMuxingError
 from .tts_factory import TTSFactory
-from .tts_interface import TTSProvider, SynthesisError as TTSSynthesisError
+from .tts_interface import TTSProvider, AbstractTTSSynthesizer, SynthesisError as TTSSynthesisError
 from ..config import settings, TranslationContext
 from ..utils.colors import Colors
 from ..models.dubbing import DubbingJob, DubbingJobStatus, DubbingRequest, TTSProviderEnum
