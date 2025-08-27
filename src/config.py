@@ -165,7 +165,7 @@ class Settings(BaseSettings):
     
     # Video processing settings
     max_video_length_minutes: int = 30
-    temp_video_dir: str = "/app/temp/videos"
+    temp_video_dir: str = "/app/video_temp"  # Changed to avoid volume mount conflict completely
     enable_video_preview: bool = True
     
     # Dubbing quality settings

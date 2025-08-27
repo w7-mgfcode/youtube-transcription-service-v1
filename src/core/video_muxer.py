@@ -24,8 +24,35 @@ class VideoMuxer:
         self.video_format = settings.video_output_format
         self.preserve_quality = True
         
-        # Ensure temp directory exists
-        os.makedirs(self.temp_video_dir, exist_ok=True)
+        # Ensure temp directory exists with proper permissions
+        self._ensure_temp_directories()
+    
+    def _ensure_temp_directories(self):
+        """Ensure temp directories exist with proper write permissions."""
+        try:
+            # Create directory structure
+            os.makedirs(self.temp_video_dir, mode=0o755, exist_ok=True)
+            
+            # Test write permissions
+            test_file = os.path.join(self.temp_video_dir, '.write_test')
+            try:
+                with open(test_file, 'w') as f:
+                    f.write('test')
+                os.remove(test_file)
+                print(Colors.CYAN + f"   ✓ Video temp directory ready: {self.temp_video_dir}" + Colors.ENDC)
+            except PermissionError:
+                # Try to fix permissions
+                try:
+                    import stat
+                    os.chmod(self.temp_video_dir, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP)
+                    print(Colors.WARNING + f"   ⚠ Fixed permissions for: {self.temp_video_dir}" + Colors.ENDC)
+                except Exception as fix_error:
+                    raise VideoMuxingError(
+                        f"Cannot write to temp video directory: {self.temp_video_dir}. "
+                        f"Permission error: {fix_error}. Please check Docker volume permissions."
+                    )
+        except Exception as e:
+            raise VideoMuxingError(f"Failed to create temp directory {self.temp_video_dir}: {e}")
     
     def replace_audio_in_video(self, 
                              video_url: str,
@@ -116,6 +143,12 @@ class VideoMuxer:
         temp_path = os.path.join(self.temp_video_dir, temp_filename)
         
         try:
+            # Verify temp directory is writable before download
+            if not os.access(self.temp_video_dir, os.W_OK):
+                raise VideoMuxingError(f"Temp directory not writable: {self.temp_video_dir}")
+            
+            print(Colors.CYAN + f"   ├─ Downloading to: {temp_path}" + Colors.ENDC)
+            
             # Use yt-dlp to download video-only stream
             cmd = [
                 'yt-dlp',
@@ -129,8 +162,17 @@ class VideoMuxer:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             
             if result.returncode != 0:
-                print(Colors.WARNING + f"   ⚠ yt-dlp error: {result.stderr}" + Colors.ENDC)
-                raise VideoMuxingError(f"Video download failed: {result.stderr}")
+                stderr_msg = result.stderr or "No error message available"
+                print(Colors.WARNING + f"   ⚠ yt-dlp error: {stderr_msg}" + Colors.ENDC)
+                
+                # Check if it's a permission error
+                if "Permission denied" in stderr_msg:
+                    raise VideoMuxingError(
+                        f"Permission denied writing to {self.temp_video_dir}. "
+                        f"Check Docker volume permissions. Error: {stderr_msg}"
+                    )
+                
+                raise VideoMuxingError(f"Video download failed: {stderr_msg}")
             
             # Find the downloaded file (yt-dlp changes extension)
             temp_dir = Path(self.temp_video_dir)
@@ -138,12 +180,15 @@ class VideoMuxer:
             
             for file_path in temp_dir.glob(pattern):
                 if file_path.is_file():
+                    print(Colors.GREEN + f"   ✓ Video downloaded: {file_path.name}" + Colors.ENDC)
                     return str(file_path)
             
             raise VideoMuxingError("Downloaded video file not found")
             
         except subprocess.TimeoutExpired:
             raise VideoMuxingError("Video download timeout (10 minutes)")
+        except PermissionError as e:
+            raise VideoMuxingError(f"Permission denied accessing {self.temp_video_dir}: {e}")
         except Exception as e:
             raise VideoMuxingError(f"Video download error: {e}")
     

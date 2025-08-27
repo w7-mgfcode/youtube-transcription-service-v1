@@ -51,7 +51,6 @@ services:
       - ./credentials/vertex-ai-key.json:/app/credentials/service-account.json:ro
       - ./data:/app/data
       - ./temp:/app/temp
-      - ./temp/videos:/app/temp/videos  # Dubbing video storage
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
